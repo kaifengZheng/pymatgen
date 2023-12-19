@@ -23,6 +23,7 @@ from math import cos, sin
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+import scipy.cluster
 import spglib
 
 from pymatgen.core.lattice import Lattice
@@ -33,7 +34,7 @@ from pymatgen.util.coord import find_in_coord_list, pbc_diff
 from pymatgen.util.due import Doi, due
 
 if TYPE_CHECKING:
-    from pymatgen.core.periodic_table import Element, Species
+    from pymatgen.core import Element, Species
     from pymatgen.core.sites import Site
     from pymatgen.symmetry.groups import CrystalSystem
 
@@ -294,7 +295,7 @@ class SpacegroupAnalyzer:
         Returns:
             list[SymmOp]: Point group symmetry operations.
         """
-        rotation, translation = self._get_symmetry()
+        rotation, _translation = self._get_symmetry()
         symm_ops = []
         seen = set()
         mat = self._structure.lattice.matrix.T
@@ -1154,7 +1155,7 @@ class PointGroupAnalyzer:
             return np.linalg.norm(v) > self.tol
 
         valid_sets = []
-        origin_site, dist_el_sites = cluster_sites(self.centered_mol, self.tol)
+        _origin_site, dist_el_sites = cluster_sites(self.centered_mol, self.tol)
         for test_set in dist_el_sites.values():
             valid_set = list(filter(not_on_axis, test_set))
             if len(valid_set) > 0:
@@ -1241,7 +1242,7 @@ class PointGroupAnalyzer:
         axis.
         """
         rot_present = defaultdict(bool)
-        origin_site, dist_el_sites = cluster_sites(self.centered_mol, self.tol)
+        _origin_site, dist_el_sites = cluster_sites(self.centered_mol, self.tol)
         test_set = min(dist_el_sites.values(), key=len)
         coords = [s.coords for s in test_set]
         for c1, c2, c3 in itertools.combinations(coords, 3):
@@ -1510,7 +1511,6 @@ def cluster_sites(mol: Molecule, tol: float, give_only_index: bool = False) -> t
     # Cluster works for dim > 2 data. We just add a dummy 0 for second
     # coordinate.
     dists: list[list[float]] = [[float(np.linalg.norm(site.coords)), 0] for site in mol]
-    import scipy.cluster
 
     f = scipy.cluster.hierarchy.fclusterdata(dists, tol, criterion="distance")
     clustered_dists: dict[str, list[list[float]]] = defaultdict(list)

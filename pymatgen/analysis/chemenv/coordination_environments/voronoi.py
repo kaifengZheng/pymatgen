@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
+import matplotlib.pyplot as plt
 import numpy as np
 from monty.json import MSONable
 from scipy.spatial import Voronoi
@@ -494,7 +495,7 @@ class DetailedVoronoiContainer(MSONable):
                     ap2 = angle_bounds[iap]
                 if ap2 < minang or ap1 > maxang:
                     continue
-                intersection, interror = rectangle_surface_intersection(
+                intersection, _interror = rectangle_surface_intersection(
                     rectangle=((d1, d2), (ap1, ap2)),
                     f_lower=f_lower,
                     f_upper=f_upper,
@@ -793,8 +794,6 @@ class DetailedVoronoiContainer(MSONable):
         def dp_func(dp):
             return 1.0 - 1.0 / np.power(dp, 3.0)
 
-        import matplotlib.pyplot as plt
-
         if step_function is None:
             step_function = {"type": "normal_cdf", "scale": 0.0001}
 
@@ -844,8 +843,6 @@ class DetailedVoronoiContainer(MSONable):
 
         def ap_func(ap):
             return np.power(ap, -0.1)
-
-        import matplotlib.pyplot as plt
 
         if step_function is None:
             step_function = {"type": "step_function", "scale": 0.0001}

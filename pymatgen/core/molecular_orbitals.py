@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from itertools import chain, combinations
 
+from pymatgen.core import Element
 from pymatgen.core.composition import Composition
-from pymatgen.core.periodic_table import Element
 
 
 class MolecularOrbitals:
@@ -28,7 +28,7 @@ class MolecularOrbitals:
     # gives {'HOMO':['O','2p',-0.338381], 'LUMO':['Ti','3d',-0.17001], 'metal':False}
     """
 
-    def __init__(self, formula):
+    def __init__(self, formula) -> None:
         """
         Args:
             formula (str): Chemical formula. Must have integer subscripts. Ex: 'SrTiO3'.

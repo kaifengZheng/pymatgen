@@ -466,7 +466,7 @@ class ChemicalPotentialDiagram(MSONable):
         into 2-dimensional space so that ConvexHull can be used to identify the
         bounding polygon.
         """
-        points_2d, v, w = simple_pca(points_3d, k=2)
+        points_2d, _v, w = simple_pca(points_3d, k=2)
         domain = ConvexHull(points_2d)
         centroid_2d = get_centroid_2d(points_2d[domain.vertices])
         ann_loc = centroid_2d @ w.T + np.mean(points_3d.T, axis=1)
@@ -648,7 +648,7 @@ def simple_pca(data: np.ndarray, k: int = 2) -> tuple[np.ndarray, np.ndarray, np
         k: Number of principal components returned
 
     Returns:
-        Tuple of projected data, eigenvalues, eigenvectors
+        tuple: projected data, eigenvalues, eigenvectors
     """
     data = data - np.mean(data.T, axis=1)  # centering the data
     cov = np.cov(data.T)  # calculating covariance matrix

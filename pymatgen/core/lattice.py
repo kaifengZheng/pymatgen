@@ -15,6 +15,7 @@ from monty.dev import deprecated
 from monty.json import MSONable
 from numpy import dot, pi, transpose
 from numpy.linalg import inv
+from scipy.spatial import Voronoi
 
 from pymatgen.util.coord import pbc_shortest_vectors
 from pymatgen.util.due import Doi, due
@@ -40,7 +41,7 @@ class Lattice(MSONable):
 
     # Properties lazily generated for efficiency.
 
-    def __init__(self, matrix: ArrayLike, pbc: tuple[bool, bool, bool] = (True, True, True)):
+    def __init__(self, matrix: ArrayLike, pbc: tuple[bool, bool, bool] = (True, True, True)) -> None:
         """Create a lattice from any sequence of 9 numbers. Note that the sequence
         is assumed to be read one row at a time. Each row represents one
         lattice vector.
@@ -800,16 +801,16 @@ class Lattice(MSONable):
 
         return min(np.linalg.norm(reflection - selling2) for reflection in all_reflections)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         outs = [
             "Lattice",
-            "    abc : " + " ".join(map(repr, self.lengths)),
-            " angles : " + " ".join(map(repr, self.angles)),
-            " volume : " + repr(self.volume),
-            "      A : " + " ".join(map(repr, self._matrix[0])),
-            "      B : " + " ".join(map(repr, self._matrix[1])),
-            "      C : " + " ".join(map(repr, self._matrix[2])),
-            "    pbc : " + " ".join(map(repr, self._pbc)),
+            f"    abc : {' '.join(map(repr, self.lengths))}",
+            f" angles : {' '.join(map(repr, self.angles))}",
+            f" volume : {self.volume!r}",
+            f"      A : {' '.join(map(repr, self._matrix[0]))}",
+            f"      B : {' '.join(map(repr, self._matrix[1]))}",
+            f"      C : {' '.join(map(repr, self._matrix[2]))}",
+            f"    pbc : {' '.join(map(repr, self._pbc))}",
         ]
         return "\n".join(outs)
 
@@ -829,7 +830,7 @@ class Lattice(MSONable):
     def __hash__(self) -> int:
         return 7
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "\n".join(" ".join([f"{i:.6f}" for i in row]) for row in self._matrix)
 
     def as_dict(self, verbosity: int = 0) -> dict:
@@ -1222,8 +1223,6 @@ class Lattice(MSONable):
         for ii, jj, kk in itertools.product([-1, 0, 1], [-1, 0, 1], [-1, 0, 1]):
             list_k_points.append(ii * vec1 + jj * vec2 + kk * vec3)
 
-        from scipy.spatial import Voronoi
-
         tess = Voronoi(list_k_points)
         out = []
         for r in tess.ridge_dict:
@@ -1316,7 +1315,7 @@ class Lattice(MSONable):
             center: Cartesian coordinates of center of sphere.
             r: radius of sphere.
             zip_results (bool): Whether to zip the results together to group by
-                 point, or return the raw fcoord, dist, index arrays
+                point, or return the raw fcoord, dist, index arrays
 
         Returns:
             if zip_results:
@@ -1390,7 +1389,7 @@ class Lattice(MSONable):
             center: Cartesian coordinates of center of sphere.
             r: radius of sphere.
             zip_results (bool): Whether to zip the results together to group by
-                 point, or return the raw fcoord, dist, index arrays
+                point, or return the raw fcoord, dist, index arrays
 
         Returns:
             if zip_results:
@@ -1447,7 +1446,7 @@ class Lattice(MSONable):
             center: Cartesian coordinates of center of sphere.
             r: radius of sphere.
             zip_results (bool): Whether to zip the results together to group by
-                 point, or return the raw fcoord, dist, index arrays
+                point, or return the raw fcoord, dist, index arrays
 
         Returns:
             if zip_results:
@@ -1539,7 +1538,7 @@ class Lattice(MSONable):
             2d array of Cartesian distances. E.g the distance between
             fcoords1[i] and fcoords2[j] is distances[i,j]
         """
-        v, d2 = pbc_shortest_vectors(self, fcoords1, fcoords2, return_d2=True)
+        _v, d2 = pbc_shortest_vectors(self, fcoords1, fcoords2, return_d2=True)
         return np.sqrt(d2)
 
     def is_hexagonal(self, hex_angle_tol: float = 5, hex_length_tol: float = 0.01) -> bool:

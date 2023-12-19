@@ -5,6 +5,7 @@ All major VASP input files.
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import itertools
 import json
@@ -30,10 +31,7 @@ from monty.os.path import zpath
 from monty.serialization import dumpfn, loadfn
 from tabulate import tabulate
 
-from pymatgen.core import SETTINGS
-from pymatgen.core.lattice import Lattice
-from pymatgen.core.periodic_table import Element, get_el_sp
-from pymatgen.core.structure import Structure
+from pymatgen.core import SETTINGS, Element, Lattice, Structure, get_el_sp
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.util.io_utils import clean_lines
 from pymatgen.util.string import str_delimited
@@ -57,6 +55,7 @@ module_dir = os.path.dirname(os.path.abspath(__file__))
 PYMATGEN_POTCAR_HASHES = loadfn(f"{module_dir}/vasp_potcar_pymatgen_hashes.json")
 # written to some newer POTCARs by VASP
 VASP_POTCAR_HASHES = loadfn(f"{module_dir}/vasp_potcar_file_hashes.json")
+POTCAR_STATS_PATH = os.path.join(module_dir, "potcar-summary-stats.json.bz2")
 
 
 class Poscar(MSONable):
@@ -1203,16 +1202,16 @@ class Kpoints(MSONable):
         comment = f"pymatgen with grid density = {kppa:.0f} / number of atoms"
         if math.fabs((math.floor(kppa ** (1 / 3) + 0.5)) ** 3 - kppa) < 1:
             kppa += kppa * 0.01
-        latt = structure.lattice
-        lengths = latt.abc
+        lattice = structure.lattice
+        lengths = lattice.abc
         ngrid = kppa / len(structure)
         mult = (ngrid * lengths[0] * lengths[1] * lengths[2]) ** (1 / 3)
 
         num_div = [int(math.floor(max(mult / length, 1))) for length in lengths]
 
-        is_hexagonal = latt.is_hexagonal()
+        is_hexagonal = lattice.is_hexagonal()
         is_face_centered = structure.get_space_group_info()[0][0] == "F"
-        has_odd = any(i % 2 == 1 for i in num_div)
+        has_odd = any(idx % 2 == 1 for idx in num_div)
         if has_odd or is_hexagonal or is_face_centered or force_gamma:
             style = Kpoints.supported_modes.Gamma
         else:
@@ -1692,7 +1691,7 @@ class PotcarSingle:
     )
 
     # used for POTCAR validation
-    potcar_summary_stats = loadfn(f"{module_dir}/potcar_summary_stats.json.gz")
+    potcar_summary_stats = loadfn(POTCAR_STATS_PATH)
 
     def __init__(self, data: str, symbol: str | None = None) -> None:
         """
@@ -1837,7 +1836,6 @@ class PotcarSingle:
                 return cls(file.read(), symbol=symbol or None)
         except UnicodeDecodeError:
             warnings.warn("POTCAR contains invalid unicode errors. We will attempt to read it by ignoring errors.")
-            import codecs
 
             with codecs.open(filename, "r", encoding="utf-8", errors="ignore") as file:
                 return cls(file.read(), symbol=symbol or None)
@@ -1946,7 +1944,67 @@ class PotcarSingle:
             hash_is_valid = md5_file_hash in VASP_POTCAR_HASHES
         return has_sha256, hash_is_valid
 
-    def identify_potcar(self, mode: Literal["data", "file"] = "data"):
+    def identify_potcar(
+        self, mode: Literal["data", "file"] = "data", data_tol: float = 1e-6
+    ) -> tuple[list[str], list[str]]:
+        """
+        Identify the symbol and compatible functionals associated with this PotcarSingle.
+
+        This method checks the summary statistics of either the POTCAR metadadata
+        (PotcarSingle._summary_stats[key]["header"] for key in ("keywords", "stats") )
+        or the entire POTCAR file (PotcarSingle._summary_stats) against a database
+        of hashes for POTCARs distributed with VASP 5.4.4.
+
+        Args:
+            mode ('data' | 'file'): 'data' mode checks the POTCAR header keywords and stats only
+                while 'file' mode checks the entire summary stats.
+            data_tol (float): Tolerance for comparing the summary statistics of the POTCAR
+                with the reference statistics.
+
+        Returns:
+            symbol (list): List of symbols associated with the PotcarSingle
+            potcar_functionals (list): List of potcar functionals associated with
+                the PotcarSingle
+        """
+        if mode == "data":
+            check_modes = ["header"]
+        elif mode == "file":
+            check_modes = ["header", "data"]
+        else:
+            raise ValueError(f"Bad {mode=}. Choose 'data' or 'file'.")
+
+        identity: dict[str, list] = {"potcar_functionals": [], "potcar_symbols": []}
+        for func in self.functional_dir:
+            for ref_psp in self.potcar_summary_stats[func].get(self.TITEL.replace(" ", ""), []):
+                if self.VRHFIN.replace(" ", "") != ref_psp["VRHFIN"]:
+                    continue
+
+                key_match = all(
+                    set(ref_psp["keywords"][key]) == set(self._summary_stats["keywords"][key])  # type: ignore[index]
+                    for key in check_modes
+                )
+
+                data_diff = [
+                    abs(ref_psp["stats"][key][stat] - self._summary_stats["stats"][key][stat])  # type: ignore[index]
+                    for stat in ["MEAN", "ABSMEAN", "VAR", "MIN", "MAX"]
+                    for key in check_modes
+                ]
+
+                data_match = all(np.array(data_diff) < data_tol)
+
+                if key_match and data_match:
+                    identity["potcar_functionals"].append(func)
+                    identity["potcar_symbols"].append(ref_psp["symbol"])
+
+        for key in identity:
+            if len(identity[key]) == 0:
+                # the two keys are set simultaneously, either key being zero indicates no match
+                return [], []
+            identity[key] = list(set(identity[key]))
+
+        return identity["potcar_functionals"], identity["potcar_symbols"]
+
+    def identify_potcar_hash_based(self, mode: Literal["data", "file"] = "data"):
         """
         Identify the symbol and compatible functionals associated with this PotcarSingle.
 
@@ -2312,23 +2370,21 @@ class PotcarSingle:
 
 
 def _gen_potcar_summary_stats(
-    append: bool = False,
-    vasp_psp_dir: str | None = None,
-    summary_stats_filename: str = f"{module_dir}/potcar_summary_stats.json.gz",
+    append: bool = False, vasp_psp_dir: str | None = None, summary_stats_filename: str = POTCAR_STATS_PATH
 ):
     """
     This function solely intended to be used for PMG development to regenerate the
-    potcar_summary_stats.json.gz file used to validate POTCARs
+    potcar-summary-stats.json.bz2 file used to validate POTCARs
 
-    THIS FUNCTION IS DESTRUCTIVE. It will completely overwrite your potcar_summary_stats.json.gz.
+    THIS FUNCTION IS DESTRUCTIVE. It will completely overwrite your potcar-summary-stats.json.bz2.
 
     Args:
-        append (bool): Change whether data is appended to the existing potcar_summary_stats.json.gz,
+        append (bool): Change whether data is appended to the existing potcar-summary-stats.json.bz2,
             or if a completely new file is generated. Defaults to False.
         PMG_VASP_PSP_DIR (str): Change where this function searches for POTCARs
             defaults to the PMG_VASP_PSP_DIR environment variable if not set. Defaults to None.
         summary_stats_filename (str): Name of the output summary stats file. Defaults to
-            '<pymatgen_install_dir>/io/vasp/potcar_summary_stats.json.gz'.
+            '<pymatgen_install_dir>/io/vasp/potcar-summary-stats.json.bz2'.
     """
     func_dir_exist: dict[str, str] = {}
     vasp_psp_dir = vasp_psp_dir or SETTINGS.get("PMG_VASP_PSP_DIR")
@@ -2364,6 +2420,8 @@ def _gen_potcar_summary_stats(
                 {
                     "LEXCH": psp.LEXCH,
                     "VRHFIN": psp.VRHFIN.replace(" ", ""),
+                    "symbol": psp.symbol,
+                    "ZVAL": psp.ZVAL,
                     **psp._summary_stats,
                 }
             )
@@ -2630,5 +2688,5 @@ class VaspInput(dict, MSONable):
         vasp_cmd = [os.path.expanduser(os.path.expandvars(t)) for t in vasp_cmd]
         if not vasp_cmd:
             raise RuntimeError("You need to supply vasp_cmd or set the PMG_VASP_EXE in .pmgrc.yaml to run VASP.")
-        with cd(run_dir), open(output_file, "w") as f_std, open(err_file, "w", buffering=1) as f_err:
-            subprocess.check_call(vasp_cmd, stdout=f_std, stderr=f_err)
+        with cd(run_dir), open(output_file, "w") as stdout_file, open(err_file, "w", buffering=1) as stderr_file:
+            subprocess.check_call(vasp_cmd, stdout=stdout_file, stderr=stderr_file)
