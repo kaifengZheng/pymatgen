@@ -9,7 +9,7 @@ import os
 import re
 import struct
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
@@ -34,6 +34,8 @@ except ImportError:
     openbabel = None
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from numpy.typing import NDArray
 
 __author__ = "Samuel Blau, Brandon Wood, Shyam Dwaraknath, Evan Spotte-Smith, Ryan Kingsbury"
@@ -47,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 
 class QCOutput(MSONable):
-    """Class to parse QChem output files."""
+    """Parse QChem output files."""
 
     def __init__(self, filename: str):
         """
@@ -59,8 +61,8 @@ class QCOutput(MSONable):
         self.data["errors"] = []
         self.data["warnings"] = {}
         self.text = ""
-        with zopen(filename, mode="rt", encoding="ISO-8859-1") as f:
-            self.text = f.read()
+        with zopen(filename, mode="rt", encoding="ISO-8859-1") as file:
+            self.text = file.read()
 
         # Check if output file contains multiple output files. If so, print an error message and exit
         self.data["multiple_outputs"] = read_pattern(
@@ -220,7 +222,7 @@ class QCOutput(MSONable):
         else:
             self.data["gap_info"] = None
 
-        # Check to see if PCM or SMD are present
+        # Check if PCM or SMD are present
         self.data["solvent_method"] = self.data["solvent_data"] = None
 
         if read_pattern(self.text, {"key": r"solvent_method\s*=?\s*pcm"}, terminate_on_match=True).get("key") == [[]]:
@@ -327,10 +329,13 @@ class QCOutput(MSONable):
             temp_dict = read_pattern(
                 self.text,
                 {"final_energy": r"\s*Total\s+energy in the final basis set\s+=\s*([\d\-\.]+)"},
+            ) or read_pattern(  # support Q-Chem 6.1.1+ (gh-3580)
+                self.text,
+                {"final_energy": r"\s+Total energy\s+=\s+([\d\-\.]+)"},
             )
 
-            if temp_dict.get("final_energy") is not None:
-                self.data["final_energy"] = float(temp_dict.get("final_energy")[-1][0])
+            if e_final_match := temp_dict.get("final_energy"):
+                self.data["final_energy"] = float(e_final_match[-1][0])
 
         # Check if calculation is using dft_d and parse relevant info if so
         self.data["using_dft_d3"] = read_pattern(self.text, {"key": r"dft_d\s*= d3"}, terminate_on_match=True).get(
@@ -632,12 +637,12 @@ class QCOutput(MSONable):
         2.) Creates separate QCCalcs for each one from the sub-files.
         """
         to_return = []
-        with zopen(filename, "rt") as f:
-            text = re.split(r"\s*(?:Running\s+)*Job\s+\d+\s+of\s+\d+\s+", f.read())
+        with zopen(filename, mode="rt") as file:
+            text = re.split(r"\s*(?:Running\s+)*Job\s+\d+\s+of\s+\d+\s+", file.read())
         if text[0] == "":
             text = text[1:]
         for i, sub_text in enumerate(text):
-            with open(f"{filename}.{i}", "w") as temp:
+            with open(f"{filename}.{i}", mode="w") as temp:
                 temp.write(sub_text)
             tempOutput = QCOutput(f"{filename}.{i}")
             to_return.append(tempOutput)
@@ -674,17 +679,14 @@ class QCOutput(MSONable):
         if spin_unrestricted:
             header_pattern = r"Final Beta MO Eigenvalues"
             footer_pattern = r"Final Alpha MO Coefficients+\s*"
-            beta_eigenvalues = read_matrix_pattern(
+            self.data["beta_eigenvalues"] = read_matrix_pattern(
                 header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
             )
 
         self.data["alpha_eigenvalues"] = alpha_eigenvalues
 
-        if spin_unrestricted:
-            self.data["beta_eigenvalues"] = beta_eigenvalues
-
     def _read_fock_matrix(self):
-        """Parses the Fock matrix. The matrix is read in whole
+        """Parse the Fock matrix. The matrix is read in whole
         from the output file and then transformed into the right dimensions.
         """
         # The header is the same for both spin-restricted and spin-unrestricted calculations.
@@ -702,13 +704,6 @@ class QCOutput(MSONable):
         alpha_fock_matrix = read_matrix_pattern(
             header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
         )
-        # The beta Fock matrix is only present if this is a spin-unrestricted calculation.
-        if spin_unrestricted:
-            header_pattern = r"Final Beta Fock Matrix"
-            footer_pattern = "SCF time:"
-            beta_fock_matrix = read_matrix_pattern(
-                header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
-            )
 
         # Convert the matrices to the right dimension. Right now they are simply
         # one massive list of numbers, but we need to split them into a matrix. The
@@ -717,13 +712,20 @@ class QCOutput(MSONable):
         alpha_fock_matrix = process_parsed_fock_matrix(alpha_fock_matrix)
         self.data["alpha_fock_matrix"] = alpha_fock_matrix
 
+        # The beta Fock matrix is only present if this is a spin-unrestricted calculation.
         if spin_unrestricted:
+            header_pattern = r"Final Beta Fock Matrix"
+            footer_pattern = "SCF time:"
+            beta_fock_matrix = read_matrix_pattern(
+                header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
+            )
+
             # Perform the same transformation for the beta Fock matrix.
             beta_fock_matrix = process_parsed_fock_matrix(beta_fock_matrix)
             self.data["beta_fock_matrix"] = beta_fock_matrix
 
     def _read_coefficient_matrix(self):
-        """Parses the coefficient matrix from the output file. Done is much
+        """Parse the coefficient matrix from the output file. Done is much
         the same was as the Fock matrix.
         """
         # The header is the same for both spin-restricted and spin-unrestricted calculations.
@@ -741,12 +743,6 @@ class QCOutput(MSONable):
         alpha_coeff_matrix = read_matrix_pattern(
             header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
         )
-        if spin_unrestricted:
-            header_pattern = r"Final Beta MO Coefficients"
-            footer_pattern = "Final Alpha Density Matrix"
-            beta_coeff_matrix = read_matrix_pattern(
-                header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
-            )
 
         # Convert the matrices to the right dimension. Right now they are simply
         # one massive list of numbers, but we need to split them into a matrix. The
@@ -756,12 +752,18 @@ class QCOutput(MSONable):
         self.data["alpha_coeff_matrix"] = alpha_coeff_matrix
 
         if spin_unrestricted:
+            header_pattern = r"Final Beta MO Coefficients"
+            footer_pattern = "Final Alpha Density Matrix"
+            beta_coeff_matrix = read_matrix_pattern(
+                header_pattern, footer_pattern, elements_pattern, self.text, postprocess=float
+            )
+
             # Perform the same transformation for the beta Fock matrix.
             beta_coeff_matrix = process_parsed_fock_matrix(beta_coeff_matrix)
             self.data["beta_coeff_matrix"] = beta_coeff_matrix
 
     def _read_charge_and_multiplicity(self):
-        """Parses charge and multiplicity."""
+        """Parse charge and multiplicity."""
         temp_charge = read_pattern(self.text, {"key": r"\$molecule\s+([\-\d]+)\s+\d"}, terminate_on_match=True).get(
             "key"
         )
@@ -795,7 +797,7 @@ class QCOutput(MSONable):
                 self.data["multiplicity"] = int(float(temp_multiplicity[0][0])) + 1
 
     def _read_species_and_inital_geometry(self):
-        """Parses species and initial geometry."""
+        """Parse species and initial geometry."""
         header_pattern = r"Standard Nuclear Orientation \(Angstroms\)\s+I\s+Atom\s+X\s+Y\s+Z\s+-+"
         table_pattern = r"\s*\d+\s+([a-zA-Z]+)\s*([\d\-\.]+)\s*([\d\-\.]+)\s*([\d\-\.]+)\s*"
         footer_pattern = r"\s*-+"
@@ -837,7 +839,7 @@ class QCOutput(MSONable):
                 self.data["initial_molecule"] = None
 
     def _read_SCF(self):
-        """Parses both old and new SCFs."""
+        """Parse both old and new SCFs."""
         if self.data.get("using_GEN_SCFMAN", []):
             footer_pattern = r"(^\s*\-+\n\s+SCF time|^\s*gen_scfman_exception: SCF failed to converge)"
             header_pattern = (
@@ -977,7 +979,7 @@ class QCOutput(MSONable):
                         dipole[ii][jj] = temp_dipole[ii][jj]
                 self.data["dipoles"]["dipole"] = dipole
 
-        self.data["multipoles"] = dict()
+        self.data["multipoles"] = {}
 
         quad_mom_pat = (
             r"\s*Quadrupole Moments \(Debye\-Ang\)\s+XX\s+([\-\.0-9]+)\s+XY\s+([\-\.0-9]+)\s+YY"
@@ -991,7 +993,7 @@ class QCOutput(MSONable):
                     key: float(temp_quadrupole_moment[0][idx]) for idx, key in enumerate(keys)
                 }
             else:
-                self.data["multipoles"]["quadrupole"] = list()
+                self.data["multipoles"]["quadrupole"] = []
                 for qpole in temp_quadrupole_moment:
                     self.data["multipoles"]["quadrupole"].append(
                         {key: float(qpole[idx]) for idx, key in enumerate(keys)}
@@ -1010,7 +1012,7 @@ class QCOutput(MSONable):
                     key: float(temp_octopole_moment[0][idx]) for idx, key in enumerate(keys)
                 }
             else:
-                self.data["multipoles"]["octopole"] = list()
+                self.data["multipoles"]["octopole"] = []
                 for opole in temp_octopole_moment:
                     self.data["multipoles"]["octopole"].append({key: float(opole[idx]) for idx, key in enumerate(keys)})
 
@@ -1023,30 +1025,14 @@ class QCOutput(MSONable):
         )
         temp_hexadecapole_moment = read_pattern(self.text, {"key": hexadeca_mom_pat}).get("key")
         if temp_hexadecapole_moment is not None:
-            keys = (
-                "XXXX",
-                "XXXY",
-                "XXYY",
-                "XYYY",
-                "YYYY",
-                "XXXZ",
-                "XXYZ",
-                "XYYZ",
-                "YYYZ",
-                "XXZZ",
-                "XYZZ",
-                "YYZZ",
-                "XZZZ",
-                "YZZZ",
-                "ZZZZ",
-            )
+            keys = "XXXX XXXY XXYY XYYY YYYY XXXZ XXYZ XYYZ YYYZ XXZZ XYZZ YYZZ XZZZ YZZZ ZZZZ".split()
 
             if len(temp_hexadecapole_moment) == 1:
                 self.data["multipoles"]["hexadecapole"] = {
                     key: float(temp_hexadecapole_moment[0][idx]) for idx, key in enumerate(keys)
                 }
             else:
-                self.data["multipoles"]["hexadecapole"] = list()
+                self.data["multipoles"]["hexadecapole"] = []
                 for hpole in temp_hexadecapole_moment:
                     self.data["multipoles"]["hexadecapole"].append(
                         {key: float(hpole[idx]) for idx, key in enumerate(keys)}
@@ -1238,7 +1224,7 @@ class QCOutput(MSONable):
             self.data["warnings"]["diagonalizing_BBt"] = True
 
     def _read_geometries(self):
-        """Parses all geometries from an optimization trajectory."""
+        """Parse all geometries from an optimization trajectory."""
         geoms = []
         if self.data.get("new_optimizer") is None:
             header_pattern = r"\s+Optimization\sCycle:\s+\d+\s+Coordinates \(Angstroms\)\s+ATOM\s+X\s+Y\s+Z"
@@ -1348,7 +1334,7 @@ class QCOutput(MSONable):
         return index - 2
 
     def _read_gradients(self):
-        """Parses all gradients obtained during an optimization trajectory."""
+        """Parse all gradients obtained during an optimization trajectory."""
         grad_header_pattern = r"Gradient of (?:SCF)?(?:MP2)? Energy(?: \(in au\.\))?"
         footer_pattern = r"(?:Max gradient component|Gradient time)"
 
@@ -1446,7 +1432,7 @@ class QCOutput(MSONable):
                     self.data["molecule_from_last_geometry"],
                 )
             # Then, if no optimized geometry or z-matrix is found, and no errors have been previously
-            # identified, check to see if the optimization failed to converge or if Lambda wasn't able
+            # identified, check if the optimization failed to converge or if Lambda wasn't able
             # to be determined or if a back transform error was encountered.
             if (
                 len(self.data.get("errors")) == 0
@@ -1479,7 +1465,7 @@ class QCOutput(MSONable):
                     self.data["errors"] += ["svd_failed"]
 
     def _read_frequency_data(self):
-        """Parses cpscf_nseg, frequencies, enthalpy, entropy, and mode vectors."""
+        """Parse cpscf_nseg, frequencies, enthalpy, entropy, and mode vectors."""
         if read_pattern(self.text, {"key": r"Calculating MO derivatives via CPSCF"}, terminate_on_match=True).get(
             "key"
         ) == [[]]:
@@ -1766,7 +1752,7 @@ class QCOutput(MSONable):
                     )
 
     def _read_pcm_information(self):
-        """Parses information from PCM solvent calculations."""
+        """Parse information from PCM solvent calculations."""
         temp_dict = read_pattern(
             self.text,
             {
@@ -1791,7 +1777,7 @@ class QCOutput(MSONable):
                 self.data["solvent_data"][key] = temp_result
 
     def _read_smd_information(self):
-        """Parses information from SMD solvent calculations."""
+        """Parse information from SMD solvent calculations."""
         temp_dict = read_pattern(
             self.text,
             {
@@ -1908,7 +1894,7 @@ class QCOutput(MSONable):
                 self.data["solvent_data"]["cmirs"][key] = temp_result
 
     def _read_nbo_data(self):
-        """Parses NBO output."""
+        """Parse NBO output."""
         dfs = nbo_parser(self.filename)
         nbo_data = {}
         for key, value in dfs.items():
@@ -1916,7 +1902,7 @@ class QCOutput(MSONable):
         self.data["nbo_data"] = nbo_data
 
     def _read_cdft(self):
-        """Parses output from charge- or spin-constrained DFT (CDFT) calculations."""
+        """Parse output from charge- or spin-constrained DFT (CDFT) calculations."""
         # Parse constraint and optimization parameters
         temp_dict = read_pattern(
             self.text, {"constraint": r"Constraint\s+(\d+)\s+:\s+([\-\.0-9]+)", "multiplier": r"\s*Lam\s+([\.\-0-9]+)"}
@@ -2055,7 +2041,7 @@ class QCOutput(MSONable):
             self.data["almo_coupling_eV"] = float(temp_dict["coupling"][0][0]) / 1000
 
     def _check_completion_errors(self):
-        """Parses potential errors that can cause jobs to crash."""
+        """Parse potential errors that can cause jobs to crash."""
         if read_pattern(
             self.text,
             {"key": r"Coordinates do not transform within specified threshold"},
@@ -2166,10 +2152,7 @@ class QCOutput(MSONable):
             self.data["errors"] += ["unknown_error"]
 
     def as_dict(self):
-        """
-        Returns:
-            MSONable dict.
-        """
+        """Get MSONable dict representation of QCOutput."""
         dct = {}
         dct["data"] = self.data
         dct["text"] = self.text
@@ -2225,9 +2208,9 @@ def check_for_structure_changes(mol1: Molecule, mol2: Molecule) -> str:
 
     # Can add logic to check the distances in the future if desired
 
-    initial_mol_graph = MoleculeGraph.with_local_env_strategy(mol_list[0], OpenBabelNN())
+    initial_mol_graph = MoleculeGraph.from_local_env_strategy(mol_list[0], OpenBabelNN())
     initial_graph = initial_mol_graph.graph
-    last_mol_graph = MoleculeGraph.with_local_env_strategy(mol_list[1], OpenBabelNN())
+    last_mol_graph = MoleculeGraph.from_local_env_strategy(mol_list[1], OpenBabelNN())
     last_graph = last_mol_graph.graph
     if initial_mol_graph.isomorphic_to(last_mol_graph):
         return "no_change"
@@ -2254,12 +2237,12 @@ def jump_to_header(lines: list[str], header: str) -> list[str]:
         Truncated lines.
 
     Raises:
-        RuntimeError
+        RuntimeError: If the header is not found.
     """
     # Search for the header
-    for i, line in enumerate(lines):
+    for idx, line in enumerate(lines):
         if header in line.strip():
-            return lines[i:]
+            return lines[idx:]
 
     # Search failed
     raise RuntimeError(f"{header=} could not be found in the lines.")
@@ -2322,7 +2305,7 @@ def parse_natural_populations(lines: list[str]) -> list[pd.DataFrame]:
         Data frame of formatted output.
 
     Raises:
-        RuntimeError
+        RuntimeError: If the header is not found.
     """
     no_failures = True
     pop_dfs = []
@@ -2382,7 +2365,7 @@ def parse_hyperbonds(lines: list[str]) -> list[pd.DataFrame]:
         Data frame of formatted output.
 
     Raises:
-        RuntimeError
+        RuntimeError: If the header is not found.
     """
     no_failures = True
     hyperbond_dfs = []
@@ -2428,7 +2411,7 @@ def parse_hyperbonds(lines: list[str]) -> list[pd.DataFrame]:
 
                 # Extract the values
                 entry: dict[str, str | float] = {}
-                entry["hyperbond index"] = int(line[0:4].strip())
+                entry["hyperbond index"] = int(line[:4].strip())
                 entry["bond atom 1 symbol"] = str(line[5:8].strip())
                 entry["bond atom 1 index"] = int(line[8:11].strip())
                 entry["bond atom 2 symbol"] = str(line[13:15].strip())
@@ -2463,7 +2446,7 @@ def parse_hybridization_character(lines: list[str]) -> list[pd.DataFrame]:
         Data frames of formatted output.
 
     Raises:
-        RuntimeError
+        RuntimeError: If the header is not found.
     """
     # Orbitals
     orbitals = ["s", "p", "d", "f"]
@@ -2510,8 +2493,8 @@ def parse_hybridization_character(lines: list[str]) -> list[pd.DataFrame]:
 
                 # Lone pair
                 if "LP" in line or "LV" in line:
-                    LPentry: dict[str, str | float] = {orbital: 0.0 for orbital in orbitals}
-                    LPentry["bond index"] = line[0:4].strip()
+                    LPentry: dict[str, str | float] = dict.fromkeys(orbitals, 0.0)
+                    LPentry["bond index"] = line[:4].strip()
                     LPentry["occupancy"] = line[7:14].strip()
                     LPentry["type"] = line[16:19].strip()
                     LPentry["orbital index"] = line[20:22].strip()
@@ -2540,7 +2523,7 @@ def parse_hybridization_character(lines: list[str]) -> list[pd.DataFrame]:
                     BDentry: dict[str, str | float] = {
                         f"atom {i} {orbital}": 0.0 for orbital in orbitals for i in range(1, 3)
                     }
-                    BDentry["bond index"] = line[0:4].strip()
+                    BDentry["bond index"] = line[:4].strip()
                     BDentry["occupancy"] = line[7:14].strip()
                     BDentry["type"] = line[16:19].strip()
                     BDentry["orbital index"] = line[20:22].strip()
@@ -2600,7 +2583,7 @@ def parse_hybridization_character(lines: list[str]) -> list[pd.DataFrame]:
                     TCentry: dict[str, str | float] = {
                         f"atom {i} {orbital}": 0.0 for orbital in orbitals for i in range(1, 4)
                     }
-                    TCentry["bond index"] = line[0:4].strip()
+                    TCentry["bond index"] = line[:4].strip()
                     TCentry["occupancy"] = line[7:14].strip()
                     TCentry["type"] = line[16:19].strip()
                     TCentry["orbital index"] = line[20:22].strip()
@@ -2680,9 +2663,7 @@ def parse_hybridization_character(lines: list[str]) -> list[pd.DataFrame]:
                     tc_data.append(TCentry)
 
             # Store values in a dataframe
-            lp_and_bd_and_tc_dfs.extend(
-                (pd.DataFrame(data=lp_data), pd.DataFrame(data=bd_data), pd.DataFrame(data=tc_data))
-            )
+            lp_and_bd_and_tc_dfs += (pd.DataFrame(lp_data), pd.DataFrame(bd_data), pd.DataFrame(tc_data))
 
     return lp_and_bd_and_tc_dfs
 
@@ -2698,7 +2679,7 @@ def parse_perturbation_energy(lines: list[str]) -> list[pd.DataFrame]:
         Data frame of formatted output.
 
     Raises:
-        RuntimeError
+        RuntimeError: If the header is not found.
     """
     no_failures = True
     e2_dfs = []
@@ -2746,7 +2727,7 @@ def parse_perturbation_energy(lines: list[str]) -> list[pd.DataFrame]:
                     second_3C = True
 
                 if line[4] == ".":
-                    entry["donor bond index"] = int(line[0:4].strip())
+                    entry["donor bond index"] = int(line[:4].strip())
                     entry["donor type"] = str(line[5:9].strip())
                     entry["donor orbital index"] = int(line[10:12].strip())
                     entry["donor atom 1 symbol"] = str(line[13:15].strip())
@@ -2764,7 +2745,7 @@ def parse_perturbation_energy(lines: list[str]) -> list[pd.DataFrame]:
                     entry["energy difference"] = float(line[62:70].strip())
                     entry["fock matrix element"] = float(line[70:79].strip())
                 elif line[5] == ".":
-                    entry["donor bond index"] = int(line[0:5].strip())
+                    entry["donor bond index"] = int(line[:5].strip())
                     entry["donor type"] = str(line[6:10].strip())
                     entry["donor orbital index"] = int(line[11:13].strip())
 
@@ -2847,11 +2828,11 @@ def nbo_parser(filename: str) -> dict[str, list[pd.DataFrame]]:
         Data frames of formatted output.
 
     Raises:
-        RuntimeError
+        RuntimeError: If a section cannot be found.
     """
     # Open the lines
-    with zopen(filename, mode="rt", encoding="ISO-8859-1") as f:
-        lines = f.readlines()
+    with zopen(filename, mode="rt", encoding="ISO-8859-1") as file:
+        lines = file.readlines()
 
     # Compile the dataframes
     dfs = {}

@@ -9,33 +9,37 @@ from __future__ import annotations
 
 import json
 import os
-from enum import Enum
+from enum import Enum, unique
+from typing import TYPE_CHECKING
 
 from monty.json import MontyEncoder
 
-# The libxc version used to generate this file!
-libxc_version = "3.0.0"
+if TYPE_CHECKING:
+    from typing_extensions import Self
+
 
 __author__ = "Matteo Giantomassi"
 __copyright__ = "Copyright 2016, The Materials Project"
-__version__ = libxc_version
+__version__ = "3.0.0"  # The libxc version used to generate this file
 __maintainer__ = "Matteo Giantomassi"
 __email__ = "gmatteo@gmail.com"
 __status__ = "Production"
 __date__ = "May 16, 2016"
 
-# Loads libxc info from json file
-with open(os.path.join(os.path.dirname(__file__), "libxc_docs.json")) as fh:
-    _all_xcfuncs = {int(k): v for k, v in json.load(fh).items()}
+# Load libxc info from json file
+with open(os.path.join(os.path.dirname(__file__), "libxc_docs.json"), encoding="utf-8") as file:
+    _all_xcfuncs = {int(k): v for k, v in json.load(file).items()}
 
 
-# @unique
+@unique
 class LibxcFunc(Enum):
     """Enumerator with the identifiers. This object is used by Xcfunc
     declared in xcfunc.py to create an internal representation of the XC functional.
     This is a low level object, client code should not interact with LibxcFunc directly
     but use the API provided by Xcfunc.
     """
+
+    # Warning: the following header is required by `regen_libxcfunc.py`
 
     # begin_include_dont_touch
     LDA_C_1D_CSC = 18
@@ -403,14 +407,14 @@ class LibxcFunc(Enum):
 
     # end_include_dont_touch
 
-    def __init__(self, _num) -> None:
+    def __init__(self, _num: int) -> None:
         """
         Args:
-            num: Number for the xc.
+            _num: Number for the xc.
         """
         info = _all_xcfuncs[self.value]
-        self.kind = info["Kind"]  # type: ignore
-        self.family = info["Family"]  # type: ignore
+        self.kind = info["Kind"]  # type: ignore[misc]
+        self.family = info["Family"]  # type: ignore[misc]
 
     def __repr__(self) -> str:
         name, kind, family = self.name, self.kind, self.family
@@ -481,24 +485,17 @@ class LibxcFunc(Enum):
         """True if this functional belongs to the hybrid + meta-GGA family."""
         return self.family == "HYB_MGGA"
 
-    def as_dict(self):
-        """Makes LibxcFunc obey the general json interface used in pymatgen for
-        easier serialization.
+    def as_dict(self) -> dict:
+        """Serialize to MSONable dict representation,
+        e.g. to write to disk as JSON.
         """
         return {"name": self.name, "@module": type(self).__module__, "@class": type(self).__name__}
 
     @classmethod
-    def from_dict(cls, dct):
-        """Makes LibxcFunc obey the general json interface used in pymatgen for
-        easier serialization.
-        """
+    def from_dict(cls, dct: dict) -> Self:
+        """Deserialize from MSONable dict representation."""
         return cls[dct["name"]]
 
-    def to_json(self):
-        """Returns a json string representation of the MSONable object."""
+    def to_json(self) -> str:
+        """Get a json string representation of the LibxcFunc."""
         return json.dumps(self.as_dict(), cls=MontyEncoder)
-
-
-if __name__ == "__main__":
-    for xc in LibxcFunc:
-        print(xc)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 
+import numpy as np
 import pytest
 from pytest import approx
 
@@ -10,12 +11,14 @@ from pymatgen.core import Element
 from pymatgen.phonon.dos import CompletePhononDos, PhononDos
 from pymatgen.util.testing import TEST_FILES_DIR, PymatgenTest
 
+TEST_DIR = f"{TEST_FILES_DIR}/phonon/dos"
+
 
 class TestPhononDos(PymatgenTest):
     def setUp(self):
-        with open(f"{TEST_FILES_DIR}/NaCl_ph_dos.json") as file:
+        with open(f"{TEST_DIR}/NaCl_ph_dos.json") as file:
             self.dos = PhononDos.from_dict(json.load(file))
-        with open(f"{TEST_FILES_DIR}/NaCl_complete_ph_dos.json") as file:
+        with open(f"{TEST_DIR}/NaCl_complete_ph_dos.json") as file:
             self.structure = CompletePhononDos.from_dict(json.load(file)).structure
 
     def test_repr(self):
@@ -44,7 +47,7 @@ class TestPhononDos(PymatgenTest):
 
     def test_dict_methods(self):
         json_str = json.dumps(self.dos.as_dict())
-        assert json_str is not None
+        assert json_str.startswith('{"@module": "pymatgen.phonon.dos", "@class": "PhononDos", "frequencies":')
         self.assert_msonable(self.dos)
 
     def test_thermodynamic_functions(self):
@@ -102,6 +105,19 @@ class TestPhononDos(PymatgenTest):
         assert self.dos.mae(dos2 - 1, two_sided=False) == pytest.approx(1.00000000000031)
         assert self.dos.mae(2 * dos2, two_sided=False) == pytest.approx(0.786546967)
 
+    def test_r2_score(self):
+        assert self.dos.r2_score(self.dos) == 1
+        assert self.dos.r2_score(self.dos + 1) == pytest.approx(-0.45647319)
+        assert self.dos.r2_score(self.dos - 1) == pytest.approx(-0.45647319)
+        assert self.dos.r2_score(2 * self.dos) == pytest.approx(-0.901056070)
+
+        # check that r2_score is 0 for DOS with same mean as self.dos
+        densities = self.dos.densities
+        mean_dos = PhononDos(self.dos.frequencies, np.full_like(densities, densities.mean()))
+        assert self.dos.r2_score(mean_dos) == pytest.approx(0)
+        # moving away from the mean should decrease r2_score
+        assert self.dos.r2_score(-mean_dos) == pytest.approx(-3.604224283)
+
     def test_get_last_peak(self):
         peak_freq = self.dos.get_last_peak()
         assert peak_freq == approx(5.9909763191)
@@ -114,7 +130,7 @@ class TestPhononDos(PymatgenTest):
 
 class TestCompletePhononDos(PymatgenTest):
     def setUp(self):
-        with open(f"{TEST_FILES_DIR}/NaCl_complete_ph_dos.json") as file:
+        with open(f"{TEST_DIR}/NaCl_complete_ph_dos.json") as file:
             self.cdos = CompletePhononDos.from_dict(json.load(file))
 
     def test_properties(self):

@@ -7,8 +7,8 @@ and PDEntry inherit from this class.
 
 from __future__ import annotations
 
-from abc import ABCMeta, abstractmethod
-from typing import TYPE_CHECKING, Literal
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import numpy as np
 from monty.json import MSONable
@@ -16,6 +16,8 @@ from monty.json import MSONable
 from pymatgen.core.composition import Composition
 
 if TYPE_CHECKING:
+    from typing import Literal
+
     from pymatgen.core import DummySpecies, Element, Species
 
 
@@ -28,7 +30,7 @@ __status__ = "Production"
 __date__ = "Mar 03, 2020"
 
 
-class Entry(MSONable, metaclass=ABCMeta):
+class Entry(MSONable, ABC):
     """A lightweight object containing the energy associated with
     a specific chemical composition. This base class is not
     intended to be instantiated directly. Note that classes
@@ -36,7 +38,7 @@ class Entry(MSONable, metaclass=ABCMeta):
     """
 
     def __init__(self, composition: Composition | str | dict[str, float], energy: float) -> None:
-        """Initializes an Entry.
+        """Initialize an Entry.
 
         Args:
             composition (Composition): Composition of the entry. For
@@ -58,6 +60,16 @@ class Entry(MSONable, metaclass=ABCMeta):
     def composition(self) -> Composition:
         """The composition of the entry."""
         return self._composition
+
+    @property
+    def formula(self) -> str:
+        """The formula of the entry."""
+        return self._composition.formula
+
+    @property
+    def reduced_formula(self) -> str:
+        """The reduced formula of the entry."""
+        return self._composition.reduced_formula
 
     @property
     @abstractmethod

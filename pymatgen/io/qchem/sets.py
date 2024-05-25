@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from monty.io import zopen
 
@@ -13,6 +13,8 @@ from pymatgen.io.qchem.inputs import QCInput
 from pymatgen.io.qchem.utils import lower_and_check_unique
 
 if TYPE_CHECKING:
+    from typing import Literal
+
     from pymatgen.core.structure import Molecule
 
 __author__ = "Samuel Blau, Brandon Wood, Shyam Dwaraknath, Evan Spotte-Smith, Ryan Kingsbury"
@@ -501,10 +503,8 @@ class QChemDictSet(QCInput):
 
         tmp_geom_opt = self.geom_opt
         geom_opt = self.geom_opt
-        if (
-            self.job_type.lower() in ["opt", "optimization"]
-            and self.qchem_version == 6
-            or (self.qchem_version == 5 and self.geom_opt is not None)
+        if (self.job_type.lower() in ["opt", "optimization"] and self.qchem_version == 6) or (
+            self.qchem_version == 5 and self.geom_opt is not None
         ):
             if self.qchem_version == 5:
                 rem["geom_opt2"] = "3"
@@ -622,8 +622,8 @@ class QChemDictSet(QCInput):
         """
         self.write_file(input_file)
         if self.smd_solvent in ("custom", "other") and self.qchem_version == 5:
-            with zopen(os.path.join(os.path.dirname(input_file), "solvent_data"), "wt") as f:
-                f.write(self.custom_smd)
+            with zopen(os.path.join(os.path.dirname(input_file), "solvent_data"), mode="wt") as file:
+                file.write(self.custom_smd)
 
 
 class SinglePointSet(QChemDictSet):

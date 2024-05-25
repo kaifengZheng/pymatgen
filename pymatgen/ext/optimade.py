@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections import namedtuple
-from os.path import join
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING, NamedTuple
+from urllib.parse import urljoin, urlparse
 
 import requests
 from tqdm import tqdm
@@ -15,8 +14,10 @@ from pymatgen.core import DummySpecies, Structure
 from pymatgen.util.due import Doi, due
 from pymatgen.util.provenance import StructureNL
 
-# TODO: importing optimade-python-tool's data structures will make more sense
-Provider = namedtuple("Provider", ["name", "base_url", "description", "homepage", "prefix"])
+if TYPE_CHECKING:
+    from typing import ClassVar
+
+    from typing_extensions import Self
 
 _logger = logging.getLogger(__name__)
 _handler = logging.StreamHandler(sys.stdout)
@@ -24,12 +25,22 @@ _logger.addHandler(_handler)
 _logger.setLevel(logging.WARNING)
 
 
+class Provider(NamedTuple):
+    """TODO: Import optimade-python-tool's data structures will make more sense."""
+
+    name: str
+    base_url: str
+    description: str
+    homepage: str
+    prefix: str
+
+
 @due.dcite(
     Doi("10.1038/s41597-021-00974-z"),
     description="OPTIMADE, an API for exchanging materials data",
 )
 class OptimadeRester:
-    """Class to call OPTIMADE-compliant APIs, see https://optimade.org and [1].
+    """Call OPTIMADE-compliant APIs, see https://optimade.org and [1].
 
     This class is ready to use but considered in-development and subject to change.
 
@@ -47,9 +58,11 @@ class OptimadeRester:
 
     # regenerate on-demand from official providers.json using OptimadeRester.refresh_aliases()
     # these aliases are provided as a convenient shortcut for users of the OptimadeRester class
-    aliases = {
+    aliases: ClassVar = {
         "aflow": "http://aflow.org/API/optimade/",
-        "alexandria": "https://alexandria.odbx.science",
+        "alexandria": "https://alexandria.icams.rub.de/pbe",
+        "alexandria.pbe": "https://alexandria.icams.rub.de/pbe",
+        "alexandria.pbesol": "https://alexandria.icams.rub.de/pbesol",
         "cod": "https://www.crystallography.net/cod/optimade",
         "cmr": "https://cmr-optimade.fysik.dtu.dk",
         "mcloud.mc3d": "https://aiida.materialscloud.org/mc3d/optimade",
@@ -68,6 +81,7 @@ class OptimadeRester:
         "nmd": "https://nomad-lab.eu/prod/rae/optimade/",
         "odbx": "https://optimade.odbx.science",
         "odbx.odbx_misc": "https://optimade-misc.odbx.science",
+        "odbx.gnome": "https://optimade-gnome.odbx.science",
         "omdb.omdb_production": "http://optimade.openmaterialsdb.se",
         "oqmd": "http://oqmd.org/optimade/",
         "jarvis": "https://jarvis.nist.gov/optimade/jarvisdft",
@@ -127,6 +141,11 @@ class OptimadeRester:
         # and values as the corresponding URL
         self.resources = {}
 
+        # preprocess aliases to ensure they have a trailing slash where appropriate
+        for alias, url in self.aliases.items():
+            if urlparse(url).path is not None and not url.endswith("/"):
+                self.aliases[alias] += "/"
+
         if not aliases_or_resource_urls:
             aliases_or_resource_urls = list(self.aliases)
             _logger.warning(
@@ -156,12 +175,12 @@ class OptimadeRester:
         return self.describe()
 
     def describe(self):
-        """Provides human-readable information about the resources being searched by the OptimadeRester."""
+        """Human-readable information about the resources being searched by the OptimadeRester."""
         provider_text = "\n".join(map(str, (provider for provider in self._providers.values() if provider)))
         return f"OptimadeRester connected to:\n{provider_text}"
 
     def _get_json(self, url):
-        """Retrieves and returns JSON resource from given url."""
+        """Retrieve and returns JSON resource from given url."""
         return self.session.get(url, timeout=self._timeout).json()
 
     @staticmethod
@@ -219,7 +238,7 @@ class OptimadeRester:
             nelements: Number of elements, e.g. 4 or [2, 5] for the range >=2 and <=5
             nsites: Number of sites, e.g. 4 or [2, 5] for the range >=2 and <=5
             chemical_formula_anonymous: The desired chemical formula in OPTIMADE anonymous formula format
-            (NB. The ordering is reversed from the pymatgen format, e.g., pymatgen "ABC2" should become "A2BC").
+            (NB. The ordering is reversed from the pymatgen format, e.g. pymatgen "ABC2" should become "A2BC").
             chemical_formula_hill: The desired chemical formula in the OPTIMADE take on the Hill formula format.
             (NB. Again, this is different from the pymatgen format, as the OPTIMADE version is a reduced chemical
             formula simply using the IUPAC/Hill ordering.)
@@ -260,7 +279,7 @@ class OptimadeRester:
             nelements: Number of elements, e.g. 4 or [2, 5] for the range >=2 and <=5
             nsites: Number of sites, e.g. 4 or [2, 5] for the range >=2 and <=5
             chemical_formula_anonymous: The desired chemical formula in OPTIMADE anonymous formula format
-            (NB. The ordering is reversed from the pymatgen format, e.g., pymatgen "ABC2" should become "A2BC").
+            (NB. The ordering is reversed from the pymatgen format, e.g. pymatgen "ABC2" should become "A2BC").
             chemical_formula_hill: The desired chemical formula in the OPTIMADE take on the Hill formula format.
             (NB. Again, this is different from the pymatgen format, as the OPTIMADE version is a reduced chemical
             formula simply using the IUPAC/Hill ordering.)
@@ -316,7 +335,7 @@ class OptimadeRester:
         response_fields = self._handle_response_fields(additional_response_fields)
 
         for identifier, resource in self.resources.items():
-            url = join(resource, f"v1/structures?filter={optimade_filter}&{response_fields=!s}")
+            url = urljoin(resource, f"v1/structures?filter={optimade_filter}&{response_fields=!s}")
 
             try:
                 json = self._get_json(url)
@@ -429,13 +448,17 @@ class OptimadeRester:
         return snls
 
     def _validate_provider(self, provider_url) -> Provider | None:
-        """Checks that a given URL is indeed an OPTIMADE provider,
+        """Check that a given URL is indeed an OPTIMADE provider,
         returning None if it is not a provider, or the provider
         prefix if it is.
 
         TODO: careful reading of OPTIMADE specification required
         TODO: add better exception handling, intentionally permissive currently
         """
+        # Add trailing slash to all URLs if missing; prevents urljoin from scrubbing
+        # sections of the path
+        if urlparse(provider_url).path is not None and not provider_url.endswith("/"):
+            provider_url += "/"
 
         def is_url(url) -> bool:
             """Basic URL validation thanks to https://stackoverflow.com/a/52455972."""
@@ -449,8 +472,10 @@ class OptimadeRester:
             _logger.warning(f"An invalid url was supplied: {provider_url}")
             return None
 
+        url = None
+
         try:
-            url = join(provider_url, "v1/info")
+            url = urljoin(provider_url, "v1/info")
             provider_info_json = self._get_json(url)
         except Exception as exc:
             _logger.warning(f"Failed to parse {url} when validating: {exc}")
@@ -486,8 +511,14 @@ class OptimadeRester:
             A dictionary of keys (in format of "provider.database") to
             Provider objects.
         """
+        # Add trailing slash to all URLs if missing; prevents urljoin from scrubbing
+        if urlparse(provider_url).path is not None and not provider_url.endswith("/"):
+            provider_url += "/"
+
+        url = None
+
         try:
-            url = join(provider_url, "v1/links")
+            url = urljoin(provider_url, "v1/links")
             provider_link_json = self._get_json(url)
         except Exception as exc:
             _logger.error(f"Failed to parse {url} when following links: {exc}")
@@ -497,8 +528,8 @@ class OptimadeRester:
             """No validation attempted."""
             ps = {}
             try:
-                d = [d for d in provider_link_json["data"] if d["attributes"]["link_type"] == "child"]
-                for link in d:
+                data = [dct for dct in provider_link_json["data"] if dct["attributes"]["link_type"] == "child"]
+                for link in data:
                     key = f"{provider}.{link['id']}" if provider != link["id"] else provider
                     if link["attributes"]["base_url"]:
                         ps[key] = Provider(
@@ -532,7 +563,7 @@ class OptimadeRester:
         return ",".join({*additional_response_fields, *self.mandatory_response_fields})
 
     def refresh_aliases(self, providers_url="https://providers.optimade.org/providers.json"):
-        """Updates available OPTIMADE structure resources based on the current list of OPTIMADE
+        """Update available OPTIMADE structure resources based on the current list of OPTIMADE
         providers.
         """
         json = self._get_json(providers_url)
@@ -546,8 +577,13 @@ class OptimadeRester:
 
         self.aliases = {alias: provider.base_url for alias, provider in structure_providers.items()}
 
+        # Add missing trailing slashes to any aliases with a path that need them
+        for alias, url in self.aliases.items():
+            if urlparse(url).path is not None and not url.endswith("/"):
+                self.aliases[alias] += "/"
+
     # TODO: revisit context manager logic here and in MPRester
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Support for "with" context."""
         return self
 

@@ -1,4 +1,4 @@
-"""This module defines classes to represent the phonon density of states, etc."""
+"""This module defines classes to represent the phonon density of states."""
 
 from __future__ import annotations
 
@@ -8,13 +8,15 @@ import numpy as np
 import scipy.constants as const
 from monty.functools import lazy_property
 from monty.json import MSONable
-from scipy.ndimage.filters import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d
 
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord import get_linear_interpolated_value
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from typing_extensions import Self
 
 BOLTZ_THZ_PER_K = const.value("Boltzmann constant in Hz/K") / const.tera  # Boltzmann constant in THz/K
 THZ_TO_J = const.value("hertz-joule relationship") * const.tera
@@ -33,7 +35,7 @@ class PhononDos(MSONable):
         self.densities = np.array(densities)
 
     def get_smeared_densities(self, sigma: float) -> np.ndarray:
-        """Returns the densities, but with a Gaussian smearing of
+        """Get the densities, but with a Gaussian smearing of
         std dev sigma applied.
 
         Args:
@@ -51,7 +53,7 @@ class PhononDos(MSONable):
         return gaussian_filter1d(self.densities, sigma / avg_diff)
 
     def __add__(self, other: PhononDos) -> PhononDos:
-        """Adds two DOS together. Pads densities with zeros to make frequencies matching.
+        """Add two DOS together. Pads densities with zeros to make frequencies matching.
 
         Args:
             other: Another DOS object.
@@ -118,7 +120,7 @@ class PhononDos(MSONable):
         return f"{type(self).__name__}({frequencies=}, {densities=}, {n_positive_freqs=})"
 
     def get_interpolated_value(self, frequency) -> float:
-        """Returns interpolated density for a particular frequency.
+        """Get interpolated density for a particular frequency.
 
         Args:
             frequency: frequency to return the density for.
@@ -126,15 +128,15 @@ class PhononDos(MSONable):
         return get_linear_interpolated_value(self.frequencies, self.densities, frequency)
 
     def __str__(self) -> str:
-        """Returns a string which can be easily plotted (using gnuplot)."""
+        """Get a string which can be easily plotted (using gnuplot)."""
         str_arr = [f"#{'Frequency':30s} {'Density':30s}"]
         for idx, freq in enumerate(self.frequencies):
             str_arr.append(f"{freq:.5f} {self.densities[idx]:.5f}")
         return "\n".join(str_arr)
 
     @classmethod
-    def from_dict(cls, dct: dict[str, Sequence]) -> PhononDos:
-        """Returns PhononDos object from dict representation of PhononDos."""
+    def from_dict(cls, dct: dict[str, Sequence]) -> Self:
+        """Get PhononDos object from dict representation of PhononDos."""
         return cls(dct["frequencies"], dct["densities"])
 
     def as_dict(self) -> dict:
@@ -251,7 +253,7 @@ class PhononDos(MSONable):
             **kwargs: allows passing in deprecated t parameter for temp
 
         Returns:
-            Phonon contribution to the internal energy
+            float: Phonon contribution to the internal energy
         """
         temp = kwargs.get("t", temp)
         if temp == 0:
@@ -286,7 +288,7 @@ class PhononDos(MSONable):
             **kwargs: allows passing in deprecated t parameter for temp
 
         Returns:
-            Phonon contribution to the Helmholtz free energy
+            float: Phonon contribution to the Helmholtz free energy
         """
         temp = kwargs.get("t", temp)
         if temp == 0:
@@ -336,8 +338,8 @@ class PhononDos(MSONable):
         """Mean absolute error between two DOSs.
 
         Args:
-            other: Another DOS object.
-            two_sided: Whether to calculate the two-sided MAE meaning interpolate each DOS to the
+            other (PhononDos): Another phonon DOS
+            two_sided (bool): Whether to calculate the two-sided MAE meaning interpolate each DOS to the
                 other's frequencies and averaging the two MAEs. Defaults to True.
 
         Returns:
@@ -354,18 +356,33 @@ class PhononDos(MSONable):
 
         return self_mae
 
-    def get_last_peak(self, threshold: float = 0.1) -> float:
+    def r2_score(self, other: PhononDos) -> float:
+        """R^2 score between two DOSs.
+
+        Args:
+            other (PhononDos): Another phonon DOS
+
+        Returns:
+            float: R^2 score
+        """
+        var = self.densities.var()
+        if var == 0:
+            return 0
+        mse = ((self.densities - other.densities) ** 2).mean()
+        return 1 - mse / var
+
+    def get_last_peak(self, threshold: float = 0.05) -> float:
         """Find the last peak in the phonon DOS defined as the highest frequency with a DOS
         value at least threshold * height of the overall highest DOS peak.
         A peak is any local maximum of the DOS as a function of frequency.
         Use dos.get_interpolated_value(peak_freq) to get density at peak_freq.
 
-        TODO method added by @janosh on 2023-12-18. seems to work well in most cases but
+        TODO method added by @janosh on 2023-12-18. seems to work in most cases but
         was not extensively tested. PRs with improvements welcome!
 
         Args:
             threshold (float, optional): Minimum ratio of the height of the last peak
-                to the height of the highest peak. Defaults to 0.1 = 10%. In case no peaks
+                to the height of the highest peak. Defaults to 0.05 = 5%. In case no peaks
                 are high enough to match, the threshold is reset to half the height of the
                 second-highest peak.
 
@@ -405,15 +422,15 @@ class CompletePhononDos(PhononDos):
             Site is a pymatgen.core.sites.Site object.
     """
 
-    def __init__(self, structure: Structure, total_dos, pdoses: dict) -> None:
+    def __init__(self, structure: Structure, total_dos, ph_doses: dict) -> None:
         """
         Args:
             structure: Structure associated with this particular DOS.
             total_dos: total Dos for structure
-            pdoses: The pdoses are supplied as a dict of {Site: Densities}.
+            ph_doses: The phonon DOSes are supplied as a dict of {Site: Densities}.
         """
         super().__init__(frequencies=total_dos.frequencies, densities=total_dos.densities)
-        self.pdos = {site: np.array(dens) for site, dens in pdoses.items()}
+        self.pdos = {site: np.array(dens) for site, dens in ph_doses.items()}
         self.structure = structure
 
     def get_site_dos(self, site) -> PhononDos:
@@ -423,7 +440,7 @@ class CompletePhononDos(PhononDos):
             site: Site in Structure associated with CompletePhononDos.
 
         Returns:
-            PhononDos containing summed orbital densities for site.
+            PhononDos: containing summed orbital densities for site.
         """
         return PhononDos(self.frequencies, self.pdos[site])
 
@@ -443,13 +460,13 @@ class CompletePhononDos(PhononDos):
         return {el: PhononDos(self.frequencies, densities) for el, densities in el_dos.items()}
 
     @classmethod
-    def from_dict(cls, dct: dict) -> CompletePhononDos:
-        """Returns CompleteDos object from dict representation."""
-        tdos = PhononDos.from_dict(dct)
+    def from_dict(cls, dct: dict) -> Self:
+        """Get CompleteDos object from dict representation."""
+        total_dos = PhononDos.from_dict(dct)
         struct = Structure.from_dict(dct["structure"])
-        pdoss = dict(zip(struct, dct["pdos"]))
+        ph_doses = dict(zip(struct, dct["pdos"]))
 
-        return cls(struct, tdos, pdoss)
+        return cls(struct, total_dos, ph_doses)
 
     def as_dict(self):
         """JSON-serializable dict representation of CompletePhononDos."""
@@ -462,8 +479,8 @@ class CompletePhononDos(PhononDos):
             "pdos": [],
         }
         if len(self.pdos) > 0:
-            for at in self.structure:
-                dct["pdos"].append(list(self.pdos[at]))
+            for site in self.structure:
+                dct["pdos"].append(list(self.pdos[site]))
         return dct
 
     def __str__(self) -> str:

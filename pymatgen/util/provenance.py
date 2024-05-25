@@ -6,23 +6,24 @@ import datetime
 import json
 import re
 import sys
-from collections import namedtuple
 from io import StringIO
+from typing import TYPE_CHECKING, NamedTuple
 
 from monty.json import MontyDecoder, MontyEncoder
+
+from pymatgen.core.structure import Molecule, Structure
 
 try:
     from pybtex import errors
     from pybtex.database.input import bibtex
 except ImportError:
-    pybtex = bibtex = None
-
-from typing import TYPE_CHECKING
-
-from pymatgen.core.structure import Molecule, Structure
+    pybtex = bibtex = errors = None
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from typing_extensions import Self
+
 
 __author__ = "Anubhav Jain, Shyue Ping Ong"
 __credits__ = "Dan Gunter"
@@ -52,7 +53,7 @@ def is_valid_bibtex(reference: str) -> bool:
     return len(bib_data.entries) > 0
 
 
-class HistoryNode(namedtuple("HistoryNode", ["name", "url", "description"])):
+class HistoryNode(NamedTuple):
     """A HistoryNode represents a step in the chain of events that lead to a
     Structure. HistoryNodes leave 'breadcrumbs' so that you can trace back how
     a Structure was created. For example, a HistoryNode might represent pulling
@@ -66,17 +67,19 @@ class HistoryNode(namedtuple("HistoryNode", ["name", "url", "description"])):
     Attributes:
         name (str): The name of a code or resource that this Structure encountered in its history.
         url (str): The URL of that code/resource.
-        description (dict): A free-form description of how the code/resource is related to the Structure.
+        description (str): A free-form description of how the code/resource is related to the Structure.
     """
 
-    __slots__ = ()
+    name: str
+    url: str
+    description: str
 
     def as_dict(self) -> dict[str, str]:
-        """Returns: Dict."""
+        """Get MSONable dict."""
         return {"name": self.name, "url": self.url, "description": self.description}
 
-    @staticmethod
-    def from_dict(dct: dict[str, str]) -> HistoryNode:
+    @classmethod
+    def from_dict(cls, dct: dict[str, str]) -> Self:
         """
         Args:
             dct (dict): Dict representation.
@@ -84,56 +87,56 @@ class HistoryNode(namedtuple("HistoryNode", ["name", "url", "description"])):
         Returns:
             HistoryNode
         """
-        return HistoryNode(dct["name"], dct["url"], dct["description"])
+        return cls(dct["name"], dct["url"], dct["description"])
 
-    @staticmethod
-    def parse_history_node(h_node):
-        """Parses a History Node object from either a dict or a tuple.
+    @classmethod
+    def parse_history_node(cls, h_node) -> Self:
+        """Parse a History Node object from either a dict or a tuple.
 
         Args:
-            h_node: A dict with name/url/description fields or a 3-element
-                tuple.
+            h_node: A dict with name/url/description fields or a 3-element tuple.
 
         Returns:
-            History node.
+            HistoryNode
         """
         if isinstance(h_node, dict):
-            return HistoryNode.from_dict(h_node)
+            return cls.from_dict(h_node)
 
         if len(h_node) != 3:
             raise ValueError(f"Invalid History node, should be dict or (name, version, description) tuple: {h_node}")
-        return HistoryNode(h_node[0], h_node[1], h_node[2])
+        return cls(h_node[0], h_node[1], h_node[2])
 
 
-class Author(namedtuple("Author", ["name", "email"])):
+class Author(NamedTuple):
     """An Author contains two fields: name and email. It is meant to represent
     the author of a Structure or the author of a code that was applied to a Structure.
     """
 
-    __slots__ = ()
+    name: str
+    email: str
 
     def __str__(self):
         """String representation of an Author."""
         return f"{self.name} <{self.email}>"
 
     def as_dict(self):
-        """Returns: MSONable dict."""
+        """Get MSONable dict."""
         return {"name": self.name, "email": self.email}
 
-    @staticmethod
-    def from_dict(d):
+    @classmethod
+    def from_dict(cls, dct: dict) -> Self:
         """
         Args:
-            d (dict): Dict representation.
+            dct (dict): Dict representation.
 
         Returns:
             Author
         """
-        return Author(d["name"], d["email"])
+        return cls(dct["name"], dct["email"])
 
-    @staticmethod
-    def parse_author(author):
-        """Parses an Author object from either a String, dict, or tuple.
+    @classmethod
+    def parse_author(cls, author) -> Self:
+        """Parse an Author object from either a String, dict, or tuple.
 
         Args:
             author: A String formatted as "NAME <email@domain.com>",
@@ -145,15 +148,15 @@ class Author(namedtuple("Author", ["name", "email"])):
         if isinstance(author, str):
             # Regex looks for whitespace, (any name), whitespace, <, (email),
             # >, whitespace
-            m = re.match(r"\s*(.*?)\s*<(.*?@.*?)>\s*", author)
-            if not m or m.start() != 0 or m.end() != len(author):
+            match = re.match(r"\s*(.*?)\s*<(.*?@.*?)>\s*", author)
+            if not match or match.start() != 0 or match.end() != len(author):
                 raise ValueError(f"Invalid author format! {author}")
-            return Author(m.groups()[0], m.groups()[1])
+            return cls(match.groups()[0], match.groups()[1])
         if isinstance(author, dict):
-            return Author.from_dict(author)
+            return cls.from_dict(author)
         if len(author) != 2:
             raise ValueError(f"Invalid author, should be String or (name, email) tuple: {author}")
-        return Author(author[0], author[1])
+        return cls(author[0], author[1])
 
 
 class StructureNL:
@@ -256,7 +259,7 @@ class StructureNL:
         self.created_at = created_at or datetime.datetime.utcnow()
 
     def as_dict(self):
-        """Returns: MSONable dict."""
+        """Get MSONable dict."""
         dct = self.structure.as_dict()
         dct["@module"] = type(self).__module__
         dct["@class"] = type(self).__name__
@@ -272,30 +275,29 @@ class StructureNL:
         return dct
 
     @classmethod
-    def from_dict(cls, d):
+    def from_dict(cls, dct: dict) -> Self:
         """
         Args:
-            d (dict): Dict representation.
+            dct (dict): Dict representation.
 
         Returns:
             Class
         """
-        a = d["about"]
-        dec = MontyDecoder()
+        about = dct["about"]
 
-        created_at = dec.process_decoded(a.get("created_at"))
-        data = {k: v for k, v in d["about"].items() if k.startswith("_")}
-        data = dec.process_decoded(data)
+        created_at = MontyDecoder().process_decoded(about.get("created_at"))
+        data = {k: v for k, v in dct["about"].items() if k.startswith("_")}
+        data = MontyDecoder().process_decoded(data)
 
-        structure = Structure.from_dict(d) if "lattice" in d else Molecule.from_dict(d)
+        structure = Structure.from_dict(dct) if "lattice" in dct else Molecule.from_dict(dct)
         return cls(
             structure,
-            a["authors"],
-            projects=a.get("projects"),
-            references=a.get("references", ""),
-            remarks=a.get("remarks"),
+            about["authors"],
+            projects=about.get("projects"),
+            references=about.get("references", ""),
+            remarks=about.get("remarks"),
             data=data,
-            history=a.get("history"),
+            history=about.get("history"),
             created_at=created_at,
         )
 
@@ -310,7 +312,7 @@ class StructureNL:
         data=None,
         histories=None,
         created_at=None,
-    ):
+    ) -> list[Self]:
         """A convenience method for getting a list of StructureNL objects by
         specifying structures and metadata separately. Some of the metadata
         is applied to all of the structures for ease of use.
@@ -339,7 +341,7 @@ class StructureNL:
 
         snl_list = []
         for idx, struct in enumerate(structures):
-            snl = StructureNL(
+            snl = cls(
                 struct,
                 authors,
                 projects=projects,
@@ -371,6 +373,7 @@ class StructureNL:
         )
 
     def __eq__(self, other: object) -> bool:
+        """Check for equality between two StructureNL objects."""
         needed_attrs = ("structure", "authors", "projects", "references", "remarks", "data", "history", "created_at")
 
         if not all(hasattr(other, attr) for attr in needed_attrs):
