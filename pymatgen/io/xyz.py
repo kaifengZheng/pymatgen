@@ -118,9 +118,9 @@ class XYZ:
             pandas.DataFrame
         """
         lines = str(self)
-        sio = StringIO(lines)
+        str_io = StringIO(lines)
         df_xyz = pd.read_csv(
-            sio, header=None, skiprows=(0, 1), comment="#", delim_whitespace=True, names=("atom", "x", "y", "z")
+            str_io, header=None, skiprows=(0, 1), comment="#", sep=r"\s+", names=("atom", "x", "y", "z")
         )
         df_xyz.index += 1
         return df_xyz
@@ -137,8 +137,7 @@ class XYZ:
         return "\n".join(self._frame_str(mol) for mol in self._mols)
 
     def write_file(self, filename: str) -> None:
-        """
-        Writes XYZ to file.
+        """Write XYZ file.
 
         Args:
             filename (str): File name of output file.
