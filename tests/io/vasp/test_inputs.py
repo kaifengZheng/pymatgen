@@ -15,8 +15,6 @@ import scipy.constants as const
 from monty.io import zopen
 from monty.serialization import loadfn
 from numpy.testing import assert_allclose
-from pytest import MonkeyPatch, approx
-
 from pymatgen.core import SETTINGS
 from pymatgen.core.composition import Composition
 from pymatgen.core.structure import Structure
@@ -36,6 +34,7 @@ from pymatgen.io.vasp.inputs import (
     _gen_potcar_summary_stats,
 )
 from pymatgen.util.testing import FAKE_POTCAR_DIR, TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, PymatgenTest
+from pytest import MonkeyPatch, approx
 
 # make sure _gen_potcar_summary_stats runs and works with all tests in this file
 _summ_stats = _gen_potcar_summary_stats(append=False, vasp_psp_dir=str(FAKE_POTCAR_DIR), summary_stats_filename=None)
@@ -1100,8 +1099,8 @@ class TestPotcarSingle(TestCase):
         assert self.psingle_Fe.nelectrons == 8
 
     def test_electron_config(self):
-        assert self.psingle_Mn_pv.electron_configuration == [(4, "s", 2), (3, "d", 5), (3, "p", 6)]
-        assert self.psingle_Fe.electron_configuration == [(4, "s", 2), (3, "d", 6)]
+        assert self.psingle_Mn_pv.electron_configuration == [(3, "d", 5), (4, "s", 2), (3, "p", 6)]
+        assert self.psingle_Fe.electron_configuration == [(3, "d", 6), (4, "s", 2)]
 
     def test_attributes(self):
         for key, val in self.Mn_pv_attrs.items():
