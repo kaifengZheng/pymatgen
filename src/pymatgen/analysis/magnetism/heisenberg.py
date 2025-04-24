@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from monty.json import MSONable, jsanitize
 from monty.serialization import dumpfn
+
 from pymatgen.analysis.graphs import StructureGraph
 from pymatgen.analysis.local_env import MinimumDistanceNN
 from pymatgen.analysis.magnetism import CollinearMagneticStructureAnalyzer, Ordering
@@ -30,6 +31,8 @@ __maintainer__ = "Nathan C. Frey"
 __email__ = "ncfrey@lbl.gov"
 __status__ = "Development"
 __date__ = "June 2019"
+
+logger = logging.getLogger(__name__)
 
 
 class HeisenbergMapper:
@@ -147,7 +150,7 @@ class HeisenbergMapper:
         unique_site_ids = {}
         wyckoff_ids = {}
 
-        for idx, (indices, symbol) in enumerate(zip(equivalent_indices, wyckoff_symbols)):
+        for idx, (indices, symbol) in enumerate(zip(equivalent_indices, wyckoff_symbols, strict=True)):
             unique_site_ids[tuple(indices)] = idx
             wyckoff_ids[idx] = symbol
             for index in indices:
@@ -194,7 +197,7 @@ class HeisenbergMapper:
 
         all_dists = all_dists[:3]
         labels = ("nn", "nnn", "nnnn")
-        dists = dict(zip(labels, all_dists))
+        dists = dict(zip(labels, all_dists, strict=True))
 
         # Get dictionary keys for interactions
         for k in unique_site_ids:
@@ -319,6 +322,8 @@ class HeisenbergMapper:
 
                 # Ignore the row if it is a duplicate to avoid singular matrix
                 # Create a temporary DataFrame with the new row
+                ex_mat = ex_mat.dropna(how="all", axis=1)
+                ex_row = ex_row.dropna(how="all", axis=1)
                 temp_df = pd.concat([ex_mat, ex_row], ignore_index=True)
                 if temp_df[j_columns].equals(temp_df[j_columns].drop_duplicates(keep="first")):
                     e_index = self.ordered_structures.index(sgraph.structure)
@@ -375,7 +380,7 @@ class HeisenbergMapper:
         # Convert J_ij to meV
         j_ij[1:] *= 1000  # J_ij in meV
         j_ij = j_ij.tolist()
-        ex_params = {j_name: j[0] for j_name, j in zip(j_names, j_ij)}
+        ex_params = {j_name: j[0] for j_name, j in zip(j_names, j_ij, strict=True)}
 
         self.ex_params = ex_params
 
@@ -393,14 +398,11 @@ class HeisenbergMapper:
         fm_struct, afm_struct = None, None
         mag_min = np.inf
         mag_max = 0.001
-        fm_e = 0
-        afm_e = 0
-        fm_e_min = 0
-        afm_e_min = 0
+        fm_e = afm_e = fm_e_min = afm_e_min = 0
 
         # epas = [e / len(s) for (e, s) in zip(self.energies, self.ordered_structures)]
 
-        for s, e in zip(self.ordered_structures, self.energies):
+        for s, e in zip(self.ordered_structures, self.energies, strict=True):
             ordering = CollinearMagneticStructureAnalyzer(s, threshold=0, make_primitive=False).ordering
             magmoms = s.site_properties["magmom"]
 
@@ -419,7 +421,7 @@ class HeisenbergMapper:
 
         # Brute force search for closest thing to FM and AFM
         if not fm_struct or not afm_struct:
-            for s, e in zip(self.ordered_structures, self.energies):
+            for s, e in zip(self.ordered_structures, self.energies, strict=True):
                 magmoms = s.site_properties["magmom"]
 
                 if abs(sum(magmoms)) > mag_max:  # FM ground state
@@ -475,7 +477,7 @@ class HeisenbergMapper:
 
         # If m_avg for FM config is < 1 we won't get sensible results.
         if m_avg < 1:
-            logging.warning(
+            logger.warning(
                 "Local magnetic moments are small (< 1 muB / atom). The exchange parameters may "
                 "be wrong, but <J> and the mean field critical temperature estimate may be OK."
             )
@@ -522,9 +524,8 @@ class HeisenbergMapper:
             mft_t = max(eigen_vals)
 
         if mft_t > 1500:  # Not sensible!
-            logging.warning(
-                "This mean field estimate is too high! Probably "
-                "the true low energy orderings were not given as inputs."
+            logger.warning(
+                "This mean field estimate is too high! Probably the true low energy orderings were not given as inputs."
             )
 
         return mft_t
@@ -551,7 +552,7 @@ class HeisenbergMapper:
                 Only <J> is available. The interaction graph will not tell
                 you much.
                 """
-            logging.warning(warning_msg)
+            logger.warning(warning_msg)
 
         # J_ij exchange interaction matrix
         for idx in range(len(sgraph.graph.nodes)):
@@ -588,8 +589,7 @@ class HeisenbergMapper:
             float: Exchange parameter J_exc in meV
         """
         # Get unique site identifiers
-        i_index = 0
-        j_index = 0
+        i_index = j_index = 0
         for k, v in self.unique_site_ids.items():
             if i in k:
                 i_index = v
@@ -722,7 +722,7 @@ class HeisenbergScreener:
         ]
 
         # Convert to energies / magnetic ion
-        energies = [e / len(s) for (e, s) in zip(energies, ordered_structures)]
+        energies = [e / len(s) for (e, s) in zip(energies, ordered_structures, strict=True)]
 
         # Check for duplicate / degenerate states (sometimes different initial
         # configs relax to the same state)
@@ -750,7 +750,7 @@ class HeisenbergScreener:
             energies = [energy for idx, energy in enumerate(energies) if idx not in remove_list]
 
         # Sort by energy if not already sorted
-        ordered_structures = [s for _, s in sorted(zip(energies, ordered_structures), reverse=False)]
+        ordered_structures = [s for _, s in sorted(zip(energies, ordered_structures, strict=True), reverse=False)]
         ordered_energies = sorted(energies, reverse=False)
 
         return ordered_structures, ordered_energies
@@ -769,10 +769,10 @@ class HeisenbergScreener:
             screened_structures (list): Sorted structures.
             screened_energies (list): Sorted energies.
         """
-        magmoms = [s.site_properties["magmom"] for s in structures]
-        n_below_1ub = [len([m for m in ms if abs(m) < 1]) for ms in magmoms]
+        magmoms = [struct.site_properties["magmom"] for struct in structures]
+        n_below_1ub = [sum(abs(m) < 1 for m in ms) for ms in magmoms]
 
-        df = pd.DataFrame(
+        df_mag = pd.DataFrame(
             {
                 "structure": structures,
                 "energy": energies,
@@ -783,8 +783,8 @@ class HeisenbergScreener:
 
         # keep the ground and first excited state fixed to capture the
         # low-energy spectrum
-        index = list(df.index)[2:]
-        df_high_energy = df.iloc[2:]
+        index = list(df_mag.index)[2:]
+        df_high_energy = df_mag.iloc[2:]
 
         # Prioritize structures with fewer magmoms < 1 uB
         df_high_energy = df_high_energy.sort_values(by="n_below_1ub")
@@ -792,9 +792,9 @@ class HeisenbergScreener:
         index = [0, 1, *df_high_energy.index]
 
         # sort
-        df = df.reindex(index)
-        screened_structures = list(df["structure"].values)
-        screened_energies = list(df["energy"].values)
+        df_mag = df_mag.reindex(index)
+        screened_structures = list(df_mag["structure"].values)
+        screened_energies = list(df_mag["energy"].values)
 
         return screened_structures, screened_energies
 
@@ -885,27 +885,26 @@ class HeisenbergModel(MSONable):
     def from_dict(cls, dct: dict) -> Self:
         """Create a HeisenbergModel from a dict."""
         # Reconstitute the site ids
-        usids = {}
-        wids = {}
-        nnis = {}
+        unique_site_ids = {}
+        wyckoff_ids = {}
+        nn_interactions = {}
 
         for k, v in dct["nn_interactions"].items():
             nn_dict = {}
             for k1, v1 in v.items():
                 key = literal_eval(k1)
                 nn_dict[key] = v1
-            nnis[k] = nn_dict
+            nn_interactions[k] = nn_dict
 
         for k, v in dct["unique_site_ids"].items():
             key = literal_eval(k)
             if isinstance(key, int):
-                usids[(key,)] = v
+                unique_site_ids[key,] = v
             elif isinstance(key, tuple):
-                usids[key] = v
+                unique_site_ids[key] = v
 
         for k, v in dct["wyckoff_ids"].items():
-            key = literal_eval(k)
-            wids[key] = v
+            wyckoff_ids[literal_eval(k)] = v
 
         # Reconstitute the structure and graph objects
         structures = []
@@ -932,9 +931,9 @@ class HeisenbergModel(MSONable):
             cutoff=dct["cutoff"],
             tol=dct["tol"],
             sgraphs=sgraphs,
-            unique_site_ids=usids,
-            wyckoff_ids=wids,
-            nn_interactions=nnis,
+            unique_site_ids=unique_site_ids,
+            wyckoff_ids=wyckoff_ids,
+            nn_interactions=nn_interactions,
             dists=dct["dists"],
             ex_mat=ex_mat,
             ex_params=dct["ex_params"],
@@ -955,8 +954,7 @@ class HeisenbergModel(MSONable):
             float: Exchange parameter J_exc in meV
         """
         # Get unique site identifiers
-        i_index = 0
-        j_index = 0
+        i_index = j_index = 0
         for k in self.unique_site_ids:
             if i in k:
                 i_index = self.unique_site_ids[k]

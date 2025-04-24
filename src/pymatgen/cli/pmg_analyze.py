@@ -7,10 +7,11 @@ import multiprocessing
 import os
 import re
 
+from tabulate import tabulate
+
 from pymatgen.apps.borg.hive import SimpleVaspToComputedEntryDrone, VaspToComputedEntryDrone
 from pymatgen.apps.borg.queen import BorgQueen
 from pymatgen.io.vasp import Outcar
-from tabulate import tabulate
 
 __author__ = "Shyue Ping Ong"
 __copyright__ = "Copyright 2012, The Materials Project"
@@ -18,6 +19,8 @@ __version__ = "4.0"
 __maintainer__ = "Shyue Ping Ong"
 __email__ = "ongsp@ucsd.edu"
 __date__ = "Aug 13 2016"
+
+logger = logging.getLogger(__name__)
 
 SAVE_FILE = "vasp_data.gz"
 
@@ -36,7 +39,7 @@ def get_energies(rootdir, reanalyze, verbose, quick, sort, fmt):
     """
     if verbose:
         log_fmt = "%(relativeCreated)d msecs : %(message)s"
-        logging.basicConfig(level=logging.INFO, format=log_fmt)
+        logger.basicConfig(level=logging.INFO, format=log_fmt)
 
     if quick:
         drone = SimpleVaspToComputedEntryDrone(inc_structure=True)
@@ -44,7 +47,7 @@ def get_energies(rootdir, reanalyze, verbose, quick, sort, fmt):
         drone = VaspToComputedEntryDrone(inc_structure=True, data=["filename", "initial_structure"])
 
     n_cpus = multiprocessing.cpu_count()
-    logging.info(f"Detected {n_cpus} cpus")
+    logger.info(f"Detected {n_cpus} cpus")
     queen = BorgQueen(drone, number_of_drones=n_cpus)
     if os.path.isfile(SAVE_FILE) and not reanalyze:
         msg = f"Using previously assimilated data from {SAVE_FILE}. Use -r to force re-analysis."
@@ -118,8 +121,7 @@ def get_magnetizations(dirc: str, ion_list: list[int]):
                     for ion in all_ions:
                         row.append(str(_mags[ion]))
                     data.append(row)
-                    if len(all_ions) > max_row:
-                        max_row = len(all_ions)
+                    max_row = max(len(all_ions), max_row)
                 except Exception:
                     pass
 

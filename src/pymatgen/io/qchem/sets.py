@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import warnings
 from typing import TYPE_CHECKING
 
 from monty.io import zopen
+
 from pymatgen.io.qchem.inputs import QCInput
 from pymatgen.io.qchem.utils import lower_and_check_unique
 
@@ -22,8 +22,6 @@ __copyright__ = "Copyright 2018-2022, The Materials Project"
 __version__ = "0.1"
 __maintainer__ = "Samuel Blau"
 __email__ = "samblau1@gmail.com"
-
-logger = logging.getLogger(__name__)
 
 # Note that in addition to the solvent-specific parameters, this dict contains
 # dielectric constants for use with each solvent. The dielectric constants
@@ -143,13 +141,14 @@ class QChemDictSet(QCInput):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         opt_variables: dict[str, list] | None = None,
         scan_variables: dict[str, list] | None = None,
         max_scf_cycles: int = 100,
         geom_opt_max_cycles: int = 200,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         geom_opt: dict | None = None,
         cdft_constraints: list[list[dict]] | None = None,
@@ -229,6 +228,8 @@ class QChemDictSet(QCInput):
             max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
             geom_opt_max_cycles (int): Maximum number of geometry optimization iterations. (Default: 200)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             nbo_params (dict): A dict containing the desired NBO params. Note that a key:value pair of
                 "version":7 will trigger NBO7 analysis. Otherwise, NBO5 analysis will be performed,
                 including if an empty dict is passed. Besides a key of "version", all other key:value
@@ -368,6 +369,7 @@ class QChemDictSet(QCInput):
         self.max_scf_cycles = max_scf_cycles
         self.geom_opt_max_cycles = geom_opt_max_cycles
         self.plot_cubes = plot_cubes
+        self.output_wavefunction = output_wavefunction
         self.nbo_params = nbo_params
         self.geom_opt = geom_opt
         self.cdft_constraints = cdft_constraints
@@ -384,7 +386,12 @@ class QChemDictSet(QCInput):
             "vdwscale": "1.1",
         }
 
-        svp_defaults: dict[str, Any] = {"rhoiso": "0.001", "nptleb": "1202", "itrngr": "2", "irotgr": "2"}
+        svp_defaults: dict[str, Any] = {
+            "rhoiso": "0.001",
+            "nptleb": "1202",
+            "itrngr": "2",
+            "irotgr": "2",
+        }
 
         plots_defaults = {"grid_spacing": "0.05", "total_density": "0"}
 
@@ -430,8 +437,17 @@ class QChemDictSet(QCInput):
         if self.job_type.lower() in ["opt", "ts", "pes_scan"]:
             rem["geom_opt_max_cycles"] = str(self.geom_opt_max_cycles)
 
+        # To keep things simpler on the analysis side, don't give user option to change *.wfn file name
+        if self.output_wavefunction:
+            rem["write_wfn"] = "wavefunction"
+
         solvent_def = 0
-        for a in [self.pcm_dielectric, self.isosvp_dielectric, self.smd_solvent, self.cmirs_solvent]:
+        for a in [
+            self.pcm_dielectric,
+            self.isosvp_dielectric,
+            self.smd_solvent,
+            self.cmirs_solvent,
+        ]:
             if a is not None:
                 solvent_def += 1
         if solvent_def > 1:
@@ -537,7 +553,10 @@ class QChemDictSet(QCInput):
                 if sec == "solvent":
                     solvent |= lower_and_check_unique(sec_dict)
                     if rem["solvent_method"] != "pcm":
-                        warnings.warn("The solvent section will be ignored unless solvent_method=pcm!", UserWarning)
+                        warnings.warn(
+                            "The solvent section will be ignored unless solvent_method=pcm!",
+                            stacklevel=2,
+                        )
                 if sec == "smx":
                     smx |= lower_and_check_unique(sec_dict)
                 if sec == "scan":
@@ -569,17 +588,18 @@ class QChemDictSet(QCInput):
                         if k == "idefesr":
                             if self.cmirs_solvent is not None and v == "0":
                                 warnings.warn(
-                                    "Setting IDEFESR=0 will disable the CMIRS calculation you requested!", UserWarning
+                                    "Setting IDEFESR=0 will disable the CMIRS calculation you requested!",
+                                    stacklevel=2,
                                 )
                             if self.cmirs_solvent is None and v == "1":
                                 warnings.warn(
                                     "Setting IDEFESR=1 will have no effect unless you specify a cmirs_solvent!",
-                                    UserWarning,
+                                    stacklevel=2,
                                 )
                         if k == "dielst" and rem["solvent_method"] != "isosvp":
                             warnings.warn(
                                 "Setting DIELST will have no effect unless you specify a solvent_method=isosvp!",
-                                UserWarning,
+                                stacklevel=2,
                             )
 
                         svp[k] = v
@@ -623,7 +643,7 @@ class QChemDictSet(QCInput):
         """
         self.write_file(input_file)
         if self.smd_solvent in {"custom", "other"} and self.qchem_version == 5:
-            with zopen(os.path.join(os.path.dirname(input_file), "solvent_data"), mode="wt") as file:
+            with zopen(os.path.join(os.path.dirname(input_file), "solvent_data"), mode="wt", encoding="utf-8") as file:
                 file.write(self.custom_smd)
 
 
@@ -640,10 +660,11 @@ class SinglePointSet(QChemDictSet):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         max_scf_cycles: int = 100,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         vdw_mode: Literal["atomic", "sequential"] = "atomic",
         cdft_constraints: list[list[dict]] | None = None,
@@ -713,6 +734,8 @@ class SinglePointSet(QChemDictSet):
                 Refer to the QChem manual for further details.
             max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             cdft_constraints (list of lists of dicts):
                 A list of lists of dictionaries, where each dictionary represents a charge
                 constraint in the cdft section of the QChem input file.
@@ -842,6 +865,7 @@ class SinglePointSet(QChemDictSet):
             qchem_version=qchem_version,
             max_scf_cycles=self.max_scf_cycles,
             plot_cubes=plot_cubes,
+            output_wavefunction=output_wavefunction,
             nbo_params=nbo_params,
             vdw_mode=vdw_mode,
             cdft_constraints=cdft_constraints,
@@ -864,10 +888,11 @@ class OptSet(QChemDictSet):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         max_scf_cycles: int = 100,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         opt_variables: dict[str, list] | None = None,
         geom_opt_max_cycles: int = 200,
@@ -940,6 +965,8 @@ class OptSet(QChemDictSet):
                 explicitly requested by passing in a dictionary (empty or otherwise) for this input parameter.
                 (Default: False)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
                 only if you are using overwrite_inputs to add a $van_der_waals section to the input.
                 In 'atomic' mode (default), dict keys represent the atomic number associated with each
@@ -1053,6 +1080,7 @@ class OptSet(QChemDictSet):
             max_scf_cycles=self.max_scf_cycles,
             geom_opt_max_cycles=self.geom_opt_max_cycles,
             plot_cubes=plot_cubes,
+            output_wavefunction=output_wavefunction,
             nbo_params=nbo_params,
             geom_opt=geom_opt,
             cdft_constraints=cdft_constraints,
@@ -1073,10 +1101,11 @@ class TransitionStateSet(QChemDictSet):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         max_scf_cycles: int = 100,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         opt_variables: dict[str, list] | None = None,
         geom_opt_max_cycles: int = 200,
@@ -1146,6 +1175,8 @@ class TransitionStateSet(QChemDictSet):
                 explicitly requested by passing in a dictionary (empty or otherwise) for this input parameter.
                 (Default: False)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             overwrite_inputs (dict): Dictionary of QChem input sections to add or overwrite variables.
                 The currently available sections (keys) are rem, pcm,
                 solvent, smx, opt, scan, van_der_waals, and plots. The value of each key is a
@@ -1187,6 +1218,7 @@ class TransitionStateSet(QChemDictSet):
             max_scf_cycles=self.max_scf_cycles,
             geom_opt_max_cycles=self.geom_opt_max_cycles,
             plot_cubes=plot_cubes,
+            output_wavefunction=output_wavefunction,
             nbo_params=nbo_params,
             geom_opt=geom_opt,
             overwrite_inputs=overwrite_inputs,
@@ -1207,10 +1239,11 @@ class ForceSet(QChemDictSet):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         max_scf_cycles: int = 100,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         vdw_mode: Literal["atomic", "sequential"] = "atomic",
         cdft_constraints: list[list[dict]] | None = None,
@@ -1271,6 +1304,8 @@ class ForceSet(QChemDictSet):
                 Refer to the QChem manual for further details.
             max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
                 only if you are using overwrite_inputs to add a $van_der_waals section to the input.
                 In 'atomic' mode (default), dict keys represent the atomic number associated with each
@@ -1376,6 +1411,7 @@ class ForceSet(QChemDictSet):
             qchem_version=qchem_version,
             max_scf_cycles=self.max_scf_cycles,
             plot_cubes=plot_cubes,
+            output_wavefunction=output_wavefunction,
             nbo_params=nbo_params,
             vdw_mode=vdw_mode,
             cdft_constraints=cdft_constraints,
@@ -1396,10 +1432,11 @@ class FreqSet(QChemDictSet):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         max_scf_cycles: int = 100,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         vdw_mode: Literal["atomic", "sequential"] = "atomic",
         cdft_constraints: list[list[dict]] | None = None,
@@ -1460,6 +1497,8 @@ class FreqSet(QChemDictSet):
                 Refer to the QChem manual for further details.
             max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
                 only if you are using overwrite_inputs to add a $van_der_waals section to the input.
                 In 'atomic' mode (default), dict keys represent the atomic number associated with each
@@ -1565,6 +1604,7 @@ class FreqSet(QChemDictSet):
             qchem_version=qchem_version,
             max_scf_cycles=self.max_scf_cycles,
             plot_cubes=plot_cubes,
+            output_wavefunction=output_wavefunction,
             nbo_params=nbo_params,
             vdw_mode=vdw_mode,
             cdft_constraints=cdft_constraints,
@@ -1593,10 +1633,11 @@ class PESScanSet(QChemDictSet):
         pcm_dielectric: float | None = None,
         isosvp_dielectric: float | None = None,
         smd_solvent: str | None = None,
-        cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
         custom_smd: str | None = None,
         max_scf_cycles: int = 100,
         plot_cubes: bool = False,
+        output_wavefunction: bool = False,
         nbo_params: dict | None = None,
         opt_variables: dict[str, list] | None = None,
         scan_variables: dict[str, list] | None = None,
@@ -1670,6 +1711,8 @@ class PESScanSet(QChemDictSet):
                 Refer to the QChem manual for further details.
             max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
             plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
             overwrite_inputs (dict): Dictionary of QChem input sections to add or overwrite variables.
                 The currently available sections (keys) are rem, pcm,
                 solvent, smx, opt, scan, van_der_waals, and plots. The value of each key is a
@@ -1714,6 +1757,7 @@ class PESScanSet(QChemDictSet):
             qchem_version=qchem_version,
             max_scf_cycles=self.max_scf_cycles,
             plot_cubes=plot_cubes,
+            output_wavefunction=output_wavefunction,
             nbo_params=nbo_params,
             overwrite_inputs=overwrite_inputs,
             vdw_mode=vdw_mode,

@@ -5,13 +5,14 @@ series of transformations.
 
 from __future__ import annotations
 
-import datetime
 import json
 import re
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from warnings import warn
 
 from monty.json import MSONable, jsanitize
+
 from pymatgen.core.structure import Structure
 from pymatgen.io.cif import CifParser
 from pymatgen.io.vasp.inputs import Poscar
@@ -23,8 +24,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
-    from pymatgen.alchemy.filters import AbstractStructureFilter
     from typing_extensions import Self
+
+    from pymatgen.alchemy.filters import AbstractStructureFilter
 
 
 class TransformedStructure(MSONable):
@@ -37,7 +39,7 @@ class TransformedStructure(MSONable):
     def __init__(
         self,
         structure: Structure,
-        transformations: AbstractTransformation | Sequence[AbstractTransformation] | None = None,
+        transformations: (AbstractTransformation | Sequence[AbstractTransformation] | None) = None,
         history: list[AbstractTransformation | dict[str, Any]] | None = None,
         other_parameters: dict[str, Any] | None = None,
     ) -> None:
@@ -45,7 +47,7 @@ class TransformedStructure(MSONable):
 
         Args:
             structure (Structure): Input structure
-            transformations (list[Transformation]): List of transformations to apply.
+            transformations (list[Transformation]): Transformations to apply.
             history (list[Transformation]): Previous history.
             other_parameters (dict): Additional parameters to be added.
         """
@@ -190,7 +192,7 @@ class TransformedStructure(MSONable):
                 to create VASP input files from structures
             **kwargs: All keyword args supported by the VASP input set.
         """
-        dct = vasp_input_set(self.final_structure, **kwargs).get_vasp_input()
+        dct = vasp_input_set(self.final_structure, **kwargs).get_input_set()
         dct["transformations.json"] = json.dumps(self.as_dict())
         return dct
 
@@ -300,7 +302,7 @@ class TransformedStructure(MSONable):
             source = "uploaded cif"
         source_info = {
             "source": source,
-            "datetime": str(datetime.datetime.now(tz=datetime.timezone.utc)),
+            "datetime": str(datetime.now(tz=timezone.utc)),
             "original_file": raw_str,
             "cif_data": cif_dict[cif_keys[0]],
         }
@@ -328,7 +330,7 @@ class TransformedStructure(MSONable):
         struct = poscar.structure
         source_info = {
             "source": "POSCAR",
-            "datetime": str(datetime.datetime.now(tz=datetime.timezone.utc)),
+            "datetime": str(datetime.now(tz=timezone.utc)),
             "original_file": raw_str,
         }
         return cls(struct, transformations, history=[source_info])
@@ -339,7 +341,7 @@ class TransformedStructure(MSONable):
         dct["@module"] = type(self).__module__
         dct["@class"] = type(self).__name__
         dct["history"] = jsanitize(self.history)
-        dct["last_modified"] = str(datetime.datetime.now(datetime.timezone.utc))
+        dct["last_modified"] = str(datetime.now(timezone.utc))
         dct["other_parameters"] = jsanitize(self.other_parameters)
         return dct
 
@@ -353,24 +355,24 @@ class TransformedStructure(MSONable):
         """Generate a StructureNL from TransformedStructure.
 
         Args:
-            authors (List[str]): List of authors contributing to the generated StructureNL.
+            authors (List[str]): Authors contributing to the generated StructureNL.
             **kwargs (Any): All kwargs supported by StructureNL.
 
         Returns:
             StructureNL: The generated StructureNL object.
         """
         if self.other_parameters:
-            warn("Data in TransformedStructure.other_parameters discarded during type conversion to SNL")
+            warn("Data in TransformedStructure.other_parameters discarded during type conversion to SNL", stacklevel=2)
         history = []
         for hist in self.history:
             snl_metadata = hist.pop("_snl", {})
-            history.append(
+            history += [
                 {
                     "name": snl_metadata.pop("name", "pymatgen"),
                     "url": snl_metadata.pop("url", "http://pypi.python.org/pypi/pymatgen"),
                     "description": hist,
                 }
-            )
+            ]
 
         return StructureNL(self.final_structure, authors, history=history, **kwargs)
 

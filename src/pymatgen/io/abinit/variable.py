@@ -94,9 +94,9 @@ class InputVariable:
             value = list(value.flatten())
 
         # values in lists
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             # Reshape a list of lists into a single list
-            if all(isinstance(v, (list, tuple)) for v in value):
+            if all(isinstance(v, list | tuple) for v in value):
                 line += self.format_list2d(value, float_decimal)
 
             else:
@@ -175,7 +175,7 @@ class InputVariable:
         line = "\n"
         for lst in values:
             for val in lst:
-                line += f" {val:{{fmt_spec}}}"
+                line += f" {val:{ {fmt_spec} }}"
             line += "\n"
 
         return line.rstrip("\n")

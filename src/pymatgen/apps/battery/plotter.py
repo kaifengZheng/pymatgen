@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+
 from pymatgen.util.plotting import pretty_plot
 
 if TYPE_CHECKING:
@@ -76,7 +77,12 @@ class VoltageProfilePlotter:
             elif self.xaxis == "x_form":
                 x.extend((sub_electrode.x_charge, sub_electrode.x_discharge))
             elif self.xaxis == "frac_x":
-                x.extend((sub_electrode.voltage_pairs[0].frac_charge, sub_electrode.voltage_pairs[0].frac_discharge))
+                x.extend(
+                    (
+                        sub_electrode.voltage_pairs[0].frac_charge,
+                        sub_electrode.voltage_pairs[0].frac_discharge,
+                    )
+                )
             else:
                 raise NotImplementedError("x_axis must be capacity_grav/capacity_vol/x_form/frac_x")
             y.extend([sub_electrode.get_average_voltage()] * 2)
@@ -86,7 +92,13 @@ class VoltageProfilePlotter:
             y.append(0)
         return x, y
 
-    def get_plot(self, width: float = 8, height: float = 8, term_zero: bool = True, ax: plt.Axes = None) -> plt.Axes:
+    def get_plot(
+        self,
+        width: float = 8,
+        height: float = 8,
+        term_zero: bool = True,
+        ax: plt.Axes = None,
+    ) -> plt.Axes:
         """Get a plot object.
 
         Args:
@@ -132,7 +144,7 @@ class VoltageProfilePlotter:
             **kwargs: passed to plotly.graph_objects.Layout
         """
         font_dict = font_dict or {"family": "Arial", "size": 24, "color": "#000000"}
-        hover_temp = "Voltage : %{y:.2f} V"
+        hover_temp = "Voltage (V): %{y:.2f}<br>x: %{x:.3f}"
 
         data = []
         working_ion_symbols = set()

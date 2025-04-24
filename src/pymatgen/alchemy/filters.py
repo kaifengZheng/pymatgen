@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import abc
+import math
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from monty.json import MSONable
+
 from pymatgen.analysis.structure_matcher import ElementComparator, StructureMatcher
 from pymatgen.core import get_el_sp
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 if TYPE_CHECKING:
-    from pymatgen.core import Structure
     from typing_extensions import Self
+
+    from pymatgen.core import Structure
 
 
 class AbstractStructureFilter(MSONable, abc.ABC):
@@ -41,7 +44,7 @@ class ContainsSpecieFilter(AbstractStructureFilter):
     def __init__(self, species, strict_compare=False, AND=True, exclude=False):
         """
         Args:
-            species ([Species/Element]): list of species to look for
+            species (list[SpeciesLike]): species to look for
             AND: whether all species must be present to pass (or fail) filter.
             strict_compare: if true, compares objects by specie or element
                 object if false, compares atomic number
@@ -130,8 +133,7 @@ class SpecieProximityFilter(AbstractStructureFilter):
         all_species = set(self.specie_and_min_dist)
         for site in structure:
             species = set(site.species)
-            sp_to_test = species.intersection(all_species)
-            if sp_to_test:
+            if sp_to_test := species.intersection(all_species):
                 max_r = max(self.specie_and_min_dist[sp] for sp in sp_to_test)
                 neighbors = structure.get_neighbors(site, max_r)
                 for sp in sp_to_test:
@@ -155,7 +157,7 @@ class SpecieProximityFilter(AbstractStructureFilter):
             dct (dict): Dict representation.
 
         Returns:
-            Filter
+            SpecieProximityFilter
         """
         return cls(**dct["init_args"])
 
@@ -163,7 +165,11 @@ class SpecieProximityFilter(AbstractStructureFilter):
 class RemoveDuplicatesFilter(AbstractStructureFilter):
     """This filter removes exact duplicate structures from the transmuter."""
 
-    def __init__(self, structure_matcher: dict | StructureMatcher | None = None, symprec: float | None = None) -> None:
+    def __init__(
+        self,
+        structure_matcher: dict | StructureMatcher | None = None,
+        symprec: float | None = None,
+    ) -> None:
         """Remove duplicate structures based on the structure matcher
         and symmetry (if symprec is given).
 
@@ -176,7 +182,7 @@ class RemoveDuplicatesFilter(AbstractStructureFilter):
         """
         self.symprec = symprec
         self.structure_list: dict[str, list[Structure]] = defaultdict(list)
-        if not isinstance(structure_matcher, (dict, StructureMatcher, type(None))):
+        if not isinstance(structure_matcher, dict | StructureMatcher | type(None)):
             raise TypeError(f"{structure_matcher=} must be a dict, StructureMatcher or None")
         if isinstance(structure_matcher, dict):
             self.structure_matcher = StructureMatcher.from_dict(structure_matcher)
@@ -213,16 +219,21 @@ class RemoveDuplicatesFilter(AbstractStructureFilter):
 class RemoveExistingFilter(AbstractStructureFilter):
     """This filter removes structures existing in a given list from the transmuter."""
 
-    def __init__(self, existing_structures, structure_matcher=None, symprec=None):
+    def __init__(
+        self,
+        existing_structures: list[Structure],
+        structure_matcher: dict | StructureMatcher | None = None,
+        symprec: float | None = None,
+    ) -> None:
         """Remove existing structures based on the structure matcher
         and symmetry (if symprec is given).
 
         Args:
-            existing_structures: List of existing structures to compare with
-            structure_matcher: Provides a structure matcher to be used for
+            existing_structures (list[Structure]): Existing structures to compare with.
+            structure_matcher (dict | StructureMatcher, optional): Will be used for
                 structure comparison.
-            symprec: The precision in the symmetry finder algorithm if None (
-                default value), no symmetry check is performed and only the
+            symprec (float | None): The precision in the symmetry finder algorithm.
+                If None (default value), no symmetry check is performed and only the
                 structure matcher is used. A recommended value is 1e-5.
         """
         self.symprec = symprec
@@ -240,15 +251,15 @@ class RemoveExistingFilter(AbstractStructureFilter):
             finder = SpacegroupAnalyzer(s, symprec=self.symprec)
             return finder.get_space_group_number()
 
-        for s in self.existing_structures:
+        for struct in self.existing_structures:
             if (
                 (
                     self.structure_matcher._comparator.get_hash(structure.composition)
-                    == self.structure_matcher._comparator.get_hash(s.composition)
+                    == self.structure_matcher._comparator.get_hash(struct.composition)
                     and self.symprec is None
                 )
-                or get_sg(s) == get_sg(structure)
-            ) and self.structure_matcher.fit(s, structure):
+                or get_sg(struct) == get_sg(structure)
+            ) and self.structure_matcher.fit(struct, structure):
                 return False
 
         self.structure_list.append(structure)
@@ -275,7 +286,7 @@ class ChargeBalanceFilter(AbstractStructureFilter):
 
     def test(self, structure: Structure):
         """True if structure is neutral."""
-        return structure.charge == 0.0
+        return math.isclose(structure.charge, 0.0)
 
 
 class SpeciesMaxDistFilter(AbstractStructureFilter):

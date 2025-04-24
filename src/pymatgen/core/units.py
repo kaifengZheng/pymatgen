@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import collections
 import re
-import warnings
 from collections import defaultdict
 from functools import partial
 from numbers import Number
@@ -267,7 +266,7 @@ class Unit(collections.abc.Mapping):
         units_old = sorted(old_base.items(), key=lambda d: _UNAME2UTYPE[d[0]])
         factor: float = old_factor / new_factor
 
-        for old, new in zip(units_old, units_new):
+        for old, new in zip(units_old, units_new, strict=True):
             if old[1] != new[1]:
                 raise UnitError(f"Units {old} and {new} are not compatible!")
             c = ALL_UNITS[_UNAME2UTYPE[old[0]]]
@@ -310,14 +309,6 @@ class FloatWithUnit(float):
             unit (str | Unit): A unit. e.g. "C".
             unit_type (str): A type of unit. e.g. "charge"
         """
-        # Check deprecated memory unit
-        # TODO: remove after 2025-01-01
-        if unit_type == "memory" and str(unit) in {"Kb", "kb", "Mb", "mb", "Gb", "gb", "Tb", "tb"}:
-            warnings.warn(
-                f"Unit {unit!s} is deprecated, please use {str(unit).upper()} instead", DeprecationWarning, stacklevel=2
-            )
-            unit = str(unit).upper()
-
         if unit_type is not None and str(unit) not in ALL_UNITS[unit_type]:
             raise UnitError(f"{unit} is not a supported unit for {unit_type}")
 
@@ -534,7 +525,7 @@ class ArrayWithUnit(np.ndarray):
         return obj
 
     def __array_finalize__(self, obj) -> None:
-        """See http://docs.scipy.org/doc/numpy/user/basics.subclassing.html
+        """See https://docs.scipy.org/doc/numpy/user/basics.subclassing.html
         for comments.
         """
         if obj is None:
@@ -640,7 +631,7 @@ class ArrayWithUnit(np.ndarray):
     @property
     def unit(self) -> Unit:
         """The unit, e.g. "eV"."""
-        return cast(Unit, self._unit)
+        return cast("Unit", self._unit)
 
     def to(self, new_unit: str | Unit) -> Self:
         """Convert to a new unit.
@@ -819,7 +810,7 @@ def unitized(unit):
             val = func(*args, **kwargs)
             unit_type = _UNAME2UTYPE[unit]
 
-            if isinstance(val, (FloatWithUnit, ArrayWithUnit)):
+            if isinstance(val, FloatWithUnit | ArrayWithUnit):
                 return val.to(unit)
 
             if isinstance(val, collections.abc.Sequence):

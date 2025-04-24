@@ -6,7 +6,9 @@ import re
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
+from monty.dev import deprecated
 from monty.json import MSONable
+
 from pymatgen.core.composition import Composition, reduce_formula
 from pymatgen.util.string import Stringify, charge_string, formula_double_format
 
@@ -140,7 +142,7 @@ class Ion(Composition, MSONable, Stringify):
 
         Args:
             iupac_ordering (bool, optional): Whether to order the
-                formula by the iupac "electronegativity" series, defined in
+                formula by the IUPAC "electronegativity" series, defined in
                 Table VI of "Nomenclature of Inorganic Chemistry (IUPAC
                 Recommendations 2005)". This ordering effectively follows
                 the groups and rows of the periodic table, except the
@@ -170,12 +172,13 @@ class Ion(Composition, MSONable, Stringify):
                 nH2O = int(nO) if nH >= 2 * nO else int(nH) // 2
                 comp = self.composition - nH2O * Composition("H2O")
 
-        el_amt_dict = {k: int(round(v)) for k, v in comp.get_el_amt_dict().items()}
+        el_amt_dict = {k: round(v) for k, v in comp.get_el_amt_dict().items()}
         formula, factor = reduce_formula(el_amt_dict, iupac_ordering=iupac_ordering)
 
-        if (self.composition.get("H") and self.composition.get("O")) is not None:
+        # This line checks specifically that the contains an equal amount of O and H. When that is the case,
+        # they should be displayed as "OH" rather than "HO".
+        if self.composition.get("H") == self.composition.get("O"):
             formula = formula.replace("HO", "OH")
-
         if nH2O > 0:
             formula += f".{nH2O}H2O"
 
@@ -187,6 +190,13 @@ class Ion(Composition, MSONable, Stringify):
         elif formula == "H2CO":
             formula = "CH3COOH"
             factor /= 2
+        # phosphoric acid system
+        elif formula == "PH3O4":
+            formula = "H3PO4"
+        elif formula == "PHO4":
+            formula = "HPO4"
+        elif formula == "P(HO2)2":
+            formula = "H2PO4"
         # acetate
         elif formula == "H3(CO)2":
             formula = "CH3COO"
@@ -205,6 +215,29 @@ class Ion(Composition, MSONable, Stringify):
         elif formula == "O" and factor % 3 == 0:
             formula = "O3"
             factor /= 3
+        # ammonia
+        elif formula == "H4N":
+            formula = "NH4"
+        elif formula == "H3N":
+            formula = "NH3"
+        # methane
+        elif formula == "H4C":
+            formula = "CH4"
+        # thiocyanate
+        elif formula == "CSN":
+            formula = "SCN"
+        # triiodide, nitride, an phosphide
+        elif (formula in ["N", "P"] and self.charge == -1) or (formula == "I" and self.charge == 1 / 3):
+            formula += "3"
+            factor /= 3
+        # formate # codespell:ignore
+        elif formula == "HCOO":
+            formula = "HCO2"
+        # oxalate
+        elif formula == "CO2" and self.charge == -2:
+            formula = "C2O4"
+            factor /= 2
+        # diatomic gases
         elif formula in {"O", "N", "F", "Cl", "H"} and factor % 2 == 0:
             formula += "2"
             factor /= 2
@@ -256,23 +289,28 @@ class Ion(Composition, MSONable, Stringify):
         composition = Composition(dct_copy)
         return cls(composition, charge)
 
-    @property
-    def to_reduced_dict(self) -> dict:
+    def as_reduced_dict(self) -> dict:
         """
         Returns:
             dict with element symbol and reduced amount e.g.
                 {"Fe": 2.0, "O":3.0}.
         """
-        dct = self.composition.to_reduced_dict
+        dct = self.composition.as_reduced_dict()
         dct["charge"] = self.charge
         return dct
+
+    @property
+    @deprecated(as_reduced_dict, deadline=(2026, 4, 4))
+    def to_reduced_dict(self) -> dict:
+        """Deprecated."""
+        return self.as_reduced_dict()
 
     @property
     def composition(self) -> Composition:
         """Composition of ion."""
         return Composition(self._data)
 
-    def oxi_state_guesses(  # type: ignore[override]
+    def oxi_state_guesses(
         self,
         oxi_states_override: dict | None = None,
         all_oxi_states: bool = False,

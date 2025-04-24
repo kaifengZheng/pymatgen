@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from monty.json import MSONable
-from pymatgen.util.coord import get_linear_interpolated_value
 from scipy import stats
 from scipy.ndimage import convolve1d
 
+from pymatgen.util.coord import get_linear_interpolated_value
+
 if TYPE_CHECKING:
-    from typing import Callable, Literal
+    from collections.abc import Callable
+    from typing import Literal
 
     from numpy.typing import NDArray
     from typing_extensions import Self
@@ -190,7 +192,11 @@ class Spectrum(MSONable):
             func: "gaussian" or "lorentzian" or a callable. If this is a callable, the sigma value is ignored. The
                 callable should only take a single argument (a numpy array) and return a set of weights.
         """
-        points = np.linspace(np.min(self.x) - np.mean(self.x), np.max(self.x) - np.mean(self.x), len(self.x))
+        points = np.linspace(
+            np.min(self.x) - np.mean(self.x),
+            np.max(self.x) - np.mean(self.x),
+            len(self.x),
+        )
         if callable(func):
             weights = func(points)
         elif func.lower() == "gaussian":

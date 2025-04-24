@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.testing import assert_allclose, assert_array_equal
-from pymatgen.analysis.nmr import ChemicalShielding, ElectricFieldGradient
-from pymatgen.util.testing import PymatgenTest
 from pytest import approx
 
+from pymatgen.analysis.nmr import ChemicalShielding, ElectricFieldGradient
+from pymatgen.util.testing import MatSciTest
 
-class TestChemicalShieldingNotation(PymatgenTest):
+
+class TestChemicalShieldingNotation(MatSciTest):
     def test_construction(self):
         cs = ChemicalShielding(np.arange(9).reshape((3, 3)))
         assert cs.shape == (3, 3)
@@ -45,7 +46,7 @@ class TestChemicalShieldingNotation(PymatgenTest):
         assert mary1.kappa == approx(0.8337, abs=1e-5)
 
 
-class TestElectricFieldGradient(PymatgenTest):
+class TestElectricFieldGradient(MatSciTest):
     def test_construction(self):
         efg = ElectricFieldGradient(np.arange(9).reshape((3, 3)))
         assert efg.shape == (3, 3)

@@ -9,6 +9,7 @@ from operator import mul
 from typing import TYPE_CHECKING
 
 from monty.json import MSONable
+
 from pymatgen.alchemy.filters import RemoveDuplicatesFilter, RemoveExistingFilter
 from pymatgen.alchemy.materials import TransformedStructure
 from pymatgen.alchemy.transmuters import StandardTransmuter
@@ -26,6 +27,8 @@ __version__ = "1.2"
 __maintainer__ = "Will Richards"
 __email__ = "wrichard@mit.edu"
 __date__ = "Aug 31, 2012"
+
+logger = logging.getLogger(__name__)
 
 
 @due.dcite(
@@ -206,7 +209,7 @@ class Substitutor(MSONable):
             if functools.reduce(mul, best_case_prob) > self._threshold:
                 if len(output_species) == len(species_list):
                     odict = {
-                        "substitutions": dict(zip(species_list, output_species)),
+                        "substitutions": dict(zip(species_list, output_species, strict=True)),
                         "probability": functools.reduce(mul, best_case_prob),
                     }
                     output.append(odict)
@@ -217,7 +220,7 @@ class Substitutor(MSONable):
                     _recurse([*output_prob, prob], [*output_species, sp])
 
         _recurse([], [])
-        logging.info(f"{len(output)} substitutions found")
+        logger.info(f"{len(output)} substitutions found")
         return output
 
     def pred_from_comp(self, composition) -> list[dict]:
@@ -234,7 +237,7 @@ class Substitutor(MSONable):
                 charge += f_el.oxi_state * composition[i_el]
             if charge == 0:
                 output.append(pred)
-        logging.info(f"{len(output)} charge balanced compositions found")
+        logger.info(f"{len(output)} charge balanced compositions found")
         return output
 
     def as_dict(self):

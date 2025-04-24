@@ -10,11 +10,11 @@ that employed core-shell models.
 from __future__ import annotations
 
 import re
-from math import fabs
 from typing import TYPE_CHECKING
 
 import numpy as np
 from monty.io import zopen
+
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 
@@ -37,7 +37,7 @@ class Xr:
     def __init__(self, structure: Structure):
         """
         Args:
-            structure (Structure/IStructure): Structure object to create the Xr object.
+            structure (Structure | IStructure): Structure object to create the Xr object.
         """
         if not structure.is_ordered:
             raise ValueError("Xr file can only be constructed from ordered structure")
@@ -55,7 +55,7 @@ class Xr:
         # There are actually 10 more fields per site
         # in a typical xr file from GULP, for example.
         for idx, site in enumerate(self.structure, start=1):
-            output.append(f"{idx } {site.specie} {site.x:.4f} {site.y:.4f} {site.z:.4f}")
+            output.append(f"{idx} {site.specie} {site.x:.4f} {site.y:.4f} {site.z:.4f}")
         mat = self.structure.lattice.matrix
         for _ in range(2):
             for j in range(3):
@@ -68,11 +68,11 @@ class Xr:
         Args:
             filename (str): name of the file to write to.
         """
-        with zopen(filename, mode="wt") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(str(self) + "\n")
 
     @classmethod
-    def from_str(cls, string: str, use_cores: bool = True, thresh: float = 1.0e-4) -> Self:
+    def from_str(cls, string: str, use_cores: bool = True, thresh: float = 1e-4) -> Self:
         """
         Creates an Xr object from a string representation.
 
@@ -106,12 +106,12 @@ class Xr:
             mat[i] = np.array([float(w) for w in tokens])
         lattice = Lattice(mat)
         if (
-            fabs(lattice.a - lengths[0]) / fabs(lattice.a) > thresh
-            or fabs(lattice.b - lengths[1]) / fabs(lattice.b) > thresh
-            or fabs(lattice.c - lengths[2]) / fabs(lattice.c) > thresh
-            or fabs(lattice.alpha - angles[0]) / fabs(lattice.alpha) > thresh
-            or fabs(lattice.beta - angles[1]) / fabs(lattice.beta) > thresh
-            or fabs(lattice.gamma - angles[2]) / fabs(lattice.gamma) > thresh
+            abs(lattice.a - lengths[0]) / abs(lattice.a) > thresh
+            or abs(lattice.b - lengths[1]) / abs(lattice.b) > thresh
+            or abs(lattice.c - lengths[2]) / abs(lattice.c) > thresh
+            or abs(lattice.alpha - angles[0]) / abs(lattice.alpha) > thresh
+            or abs(lattice.beta - angles[1]) / abs(lattice.beta) > thresh
+            or abs(lattice.gamma - angles[2]) / abs(lattice.gamma) > thresh
         ):
             raise RuntimeError(
                 f"cell parameters in header ({lengths}, {angles}) are not consistent with Cartesian "
@@ -138,7 +138,7 @@ class Xr:
         return cls(Structure(lattice, sp, coords, coords_are_cartesian=True))
 
     @classmethod
-    def from_file(cls, filename: str | Path, use_cores: bool = True, thresh: float = 1.0e-4) -> Self:
+    def from_file(cls, filename: str | Path, use_cores: bool = True, thresh: float = 1e-4) -> Self:
         """
         Reads an xr-formatted file to create an Xr object.
 
@@ -155,5 +155,5 @@ class Xr:
             xr (Xr): Xr object corresponding to the input
                     file.
         """
-        with zopen(filename, mode="rt") as file:
+        with zopen(filename, mode="rt", encoding="utf-8") as file:
             return cls.from_str(file.read(), use_cores=use_cores, thresh=thresh)

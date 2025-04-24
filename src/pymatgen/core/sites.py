@@ -8,17 +8,20 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from monty.json import MontyDecoder, MontyEncoder, MSONable
+
 from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import DummySpecies, Element, Species, get_el_sp
 from pymatgen.util.coord import pbc_diff
+from pymatgen.util.misc import is_np_dict_equal
 
 if TYPE_CHECKING:
     from typing import Any
 
     from numpy.typing import ArrayLike
-    from pymatgen.util.typing import CompositionLike, SpeciesLike, Vector3D
     from typing_extensions import Self
+
+    from pymatgen.util.typing import CompositionLike, SpeciesLike, Vector3D
 
 
 class Site(collections.abc.Hashable, MSONable):
@@ -44,17 +47,17 @@ class Site(collections.abc.Hashable, MSONable):
         Args:
             species: Species on the site. Can be:
                 i.  A Composition-type object (preferred)
-                ii. An  element / species specified either as a string
+                ii. An element / species specified either as a string
                     symbols, e.g. "Li", "Fe2+", "P" or atomic numbers,
                     e.g. 3, 56, or actual Element or Species objects.
                 iii.Dict of elements/species and occupancies, e.g.
                     {"Fe" : 0.5, "Mn":0.5}. This allows the setup of
                     disordered structures.
-            coords: Cartesian coordinates of site.
-            properties: Properties associated with the site as a dict, e.g.
+            coords (ArrayLike): Cartesian coordinates of site.
+            properties (dict): Properties associated with the site, e.g.
                 {"magmom": 5}. Defaults to None.
-            label: Label for the site. Defaults to None.
-            skip_checks: Whether to ignore all the usual checks and just
+            label (str): Label for the site. Defaults to None.
+            skip_checks (bool): Whether to ignore all the usual checks and just
                 create the site. Use this if the Site is created in a controlled
                 manner and speed is desired.
         """
@@ -82,14 +85,14 @@ class Site(collections.abc.Hashable, MSONable):
             return props[attr]
         raise AttributeError(f"{attr=} not found on {type(self).__name__}")
 
-    def __getitem__(self, el: Element) -> float:  # type: ignore[override]
+    def __getitem__(self, el: Element) -> float:
         """Get the occupancy for element."""
         return self.species[el]
 
     def __eq__(self, other: object) -> bool:
         """Site is equal to another site if the species and occupancies are the
-        same, and the coordinates are the same to some tolerance.  numpy
-        function `allclose` is used to determine if coordinates are close.
+        same, and the coordinates are the same to some tolerance. `np.allclose`
+        is used to determine if coordinates are close.
         """
         if not isinstance(other, type(self)):
             return NotImplemented
@@ -97,10 +100,10 @@ class Site(collections.abc.Hashable, MSONable):
         return (
             self.species == other.species
             and np.allclose(self.coords, other.coords, atol=type(self).position_atol)
-            and self.properties == other.properties
+            and is_np_dict_equal(self.properties, other.properties)
         )
 
-    def __hash__(self) -> int:  # type: ignore[override]
+    def __hash__(self) -> int:
         """Minimally effective hash function that just distinguishes between Sites
         with different elements.
         """
@@ -134,7 +137,7 @@ class Site(collections.abc.Hashable, MSONable):
     @property
     def species(self) -> Composition:
         """The species on the site as a composition, e.g. Fe0.5Mn0.5."""
-        return cast(Composition, self._species)
+        return cast("Composition", self._species)
 
     @species.setter
     def species(self, species: SpeciesLike | CompositionLike) -> None:
@@ -148,7 +151,7 @@ class Site(collections.abc.Hashable, MSONable):
         if total_occu > 1 + Composition.amount_tolerance:
             raise ValueError("Species occupancies sum to more than 1!")
 
-        self._species = cast(Composition, species)
+        self._species = cast("Composition", species)
 
     @property
     def label(self) -> str:
@@ -303,31 +306,31 @@ class PeriodicSite(Site, MSONable):
         Args:
             species: Species on the site. Can be:
                 i.  A Composition-type object (preferred)
-                ii. An  element / species specified either as a string
+                ii. An element / species specified either as a string
                     symbols, e.g. "Li", "Fe2+", "P" or atomic numbers,
                     e.g. 3, 56, or actual Element or Species objects.
                 iii.Dict of elements/species and occupancies, e.g.
-                    {"Fe" : 0.5, "Mn":0.5}. This allows the setup of
+                    {"Fe": 0.5, "Mn": 0.5}. This allows the setup of
                     disordered structures.
-            coords: Coordinates of site, fractional coordinates
+            coords (ArrayLike): Coordinates of site, fractional coordinates
                 by default. See ``coords_are_cartesian`` for more details.
-            lattice: Lattice associated with the site.
-            to_unit_cell: Translates fractional coordinate to the
+            lattice (Lattice): Lattice associated with the site.
+            to_unit_cell (bool): Translates fractional coordinate to the
                 basic unit cell, i.e. all fractional coordinates satisfy 0
                 <= a < 1. Defaults to False.
-            coords_are_cartesian: Set to True if you are providing
+            coords_are_cartesian (bool): Set to True if you are providing
                 Cartesian coordinates. Defaults to False.
-            properties: Properties associated with the site as a dict, e.g.
+            properties (dict): Properties associated with the site, e.g.
                 {"magmom": 5}. Defaults to None.
-            label: Label for the site. Defaults to None.
-            skip_checks: Whether to ignore all the usual checks and just
+            label (str): Label for the site. Defaults to None.
+            skip_checks (bool): Whether to ignore all the usual checks and just
                 create the site. Use this if the PeriodicSite is created in a
                 controlled manner and speed is desired.
         """
         frac_coords = lattice.get_fractional_coords(coords) if coords_are_cartesian else coords
 
         if to_unit_cell:
-            frac_coords = np.array([np.mod(f, 1) if p else f for p, f in zip(lattice.pbc, frac_coords)])
+            frac_coords = np.array([np.mod(f, 1) if p else f for p, f in zip(lattice.pbc, frac_coords, strict=True)])
 
         if not skip_checks:
             frac_coords = np.array(frac_coords)
@@ -343,7 +346,7 @@ class PeriodicSite(Site, MSONable):
 
         self._lattice: Lattice = lattice
         self._frac_coords: np.ndarray = np.asarray(frac_coords)
-        self._species: Composition = cast(Composition, species)
+        self._species: Composition = cast("Composition", species)
         self._coords: np.ndarray | None = None
         self.properties: dict = properties or {}
         self._label = label
@@ -362,7 +365,7 @@ class PeriodicSite(Site, MSONable):
             self.species == other.species
             and self.lattice == other.lattice
             and np.allclose(self.coords, other.coords, atol=Site.position_atol)
-            and self.properties == other.properties
+            and is_np_dict_equal(self.properties, other.properties)
         )
 
     def __repr__(self) -> str:
@@ -473,11 +476,17 @@ class PeriodicSite(Site, MSONable):
 
     def to_unit_cell(self, in_place: bool = False) -> Self | None:
         """Move frac coords to within the unit cell."""
-        frac_coords = [np.mod(f, 1) if p else f for p, f in zip(self.lattice.pbc, self.frac_coords)]
+        frac_coords = [np.mod(f, 1) if p else f for p, f in zip(self.lattice.pbc, self.frac_coords, strict=True)]
         if in_place:
             self.frac_coords = np.array(frac_coords)
             return None
-        return type(self)(self.species, frac_coords, self.lattice, properties=self.properties, label=self.label)
+        return type(self)(
+            self.species,
+            frac_coords,
+            self.lattice,
+            properties=self.properties,
+            label=self.label,
+        )
 
     def is_periodic_image(
         self,

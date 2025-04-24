@@ -6,16 +6,17 @@ from __future__ import annotations
 
 import collections
 import csv
-import datetime
 import itertools
 import json
 import logging
 import multiprocessing as mp
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from monty.json import MontyDecoder, MontyEncoder, MSONable
+
 from pymatgen.analysis.phase_diagram import PDEntry
 from pymatgen.analysis.structure_matcher import SpeciesComparator, StructureMatcher
 from pymatgen.core import Composition, Element
@@ -24,9 +25,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from typing import Literal
 
+    from typing_extensions import Self
+
     from pymatgen.entries import Entry
     from pymatgen.entries.computed_entries import ComputedEntry, ComputedStructureEntry
-    from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +42,21 @@ def _get_host(structure, species_to_remove):
 
 
 def _perform_grouping(args):
-    entries_json, hosts_json, ltol, stol, angle_tol, primitive_cell, scale, comparator, groups = args
+    (
+        entries_json,
+        hosts_json,
+        ltol,
+        stol,
+        angle_tol,
+        primitive_cell,
+        scale,
+        comparator,
+        groups,
+    ) = args
 
     entries = json.loads(entries_json, cls=MontyDecoder)
     hosts = json.loads(hosts_json, cls=MontyDecoder)
-    unmatched = list(zip(entries, hosts))
+    unmatched = list(zip(entries, hosts, strict=True))
     while len(unmatched) > 0:
         ref_host = unmatched[0][1]
         logger.info(f"Reference tid = {unmatched[0][0].entry_id}, formula = {ref_host.formula}")
@@ -110,7 +122,7 @@ def group_entries_by_structure(
     """
     if comparator is None:
         comparator = SpeciesComparator()
-    start = datetime.datetime.now(tz=datetime.timezone.utc)
+    start = datetime.now(tz=timezone.utc)
     logger.info(f"Started at {start}")
     entries_host = [(entry, _get_host(entry.structure, species_to_remove)) for entry in entries]
     if ncpus:
@@ -118,7 +130,7 @@ def group_entries_by_structure(
         for entry, host in entries_host:
             symm_entries[comparator.get_structure_hash(host)].append((entry, host))
 
-        logging.info(f"Using {ncpus} cpus")
+        logger.info(f"Using {ncpus} cpus")
         manager = mp.Manager()
         groups = manager.list()
         with mp.Pool(ncpus) as pool:
@@ -159,8 +171,8 @@ def group_entries_by_structure(
     entry_groups = []
     for g in groups:
         entry_groups.append(json.loads(g, cls=MontyDecoder))
-    logging.info(f"Finished at {datetime.datetime.now(tz=datetime.timezone.utc)}")
-    logging.info(f"Took {datetime.datetime.now(tz=datetime.timezone.utc) - start}")
+    logger.info(f"Finished at {datetime.now(tz=timezone.utc)}")
+    logger.info(f"Took {datetime.now(tz=timezone.utc) - start}")
     return entry_groups
 
 
@@ -301,7 +313,7 @@ class EntrySet(collections.abc.MutableSet, MSONable):
         for entry in self.entries:
             els.update(entry.elements)
         elements = sorted(els, key=lambda a: a.X)
-        with open(filename, mode="w") as file:
+        with open(filename, mode="w", encoding="utf-8") as file:
             writer = csv.writer(
                 file,
                 delimiter=",",
@@ -310,7 +322,7 @@ class EntrySet(collections.abc.MutableSet, MSONable):
             )
             writer.writerow(["Name"] + [el.symbol for el in elements] + ["Energy"])
             for entry in self.entries:
-                row: list[str] = [entry.name if not latexify_names else re.sub(r"([0-9]+)", r"_{\1}", entry.name)]
+                row: list[str] = [(entry.name if not latexify_names else re.sub(r"([0-9]+)", r"_{\1}", entry.name))]
                 row.extend([str(entry.composition[el]) for el in elements])
                 row.append(str(entry.energy))
                 writer.writerow(row)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.testing import assert_allclose
+from pytest import approx
+
 from pymatgen.analysis.ferroelectricity.polarization import (
     EnergyTrend,
     Polarization,
@@ -11,8 +13,7 @@ from pymatgen.analysis.ferroelectricity.polarization import (
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp.inputs import Potcar
 from pymatgen.io.vasp.outputs import Outcar
-from pymatgen.util.testing import TEST_FILES_DIR, PymatgenTest
-from pytest import approx
+from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/io/vasp/fixtures/BTO_221_99_polarization"
 bto_folders = ["nonpolar_polarization"]
@@ -37,8 +38,8 @@ ions = np.array(
 )
 
 
-class TestUtils(PymatgenTest):
-    def setUp(self):
+class TestUtils(MatSciTest):
+    def setup_method(self):
         self.potcar = Potcar.from_file(f"{TEST_DIR}/POTCAR")
         self.zval_dict = {"Ba": 10, "Ti": 10, "O": 6}
         self.ions = ions
@@ -53,8 +54,8 @@ class TestUtils(PymatgenTest):
         assert_allclose(p_ion, self.ions[-1].ravel().tolist())
 
 
-class TestPolarization(PymatgenTest):
-    def setUp(self):
+class TestPolarization(MatSciTest):
+    def setup_method(self):
         self.p_ions = ions
         self.p_ions_outcar = np.array(
             [
@@ -176,10 +177,26 @@ class TestPolarization(PymatgenTest):
         same_branch = self.polarization.get_same_branch_polarization_data(
             convert_to_muC_per_cm2=True, all_in_polar=False
         )
-        assert_allclose(same_branch[0].ravel().tolist(), self.same_branch[0].ravel().tolist(), atol=1e-7)
-        assert_allclose(same_branch[1].ravel().tolist(), self.same_branch[1].ravel().tolist(), atol=1e-7)
-        assert_allclose(same_branch[3].ravel().tolist(), self.same_branch[3].ravel().tolist(), atol=1e-7)
-        assert_allclose(same_branch[-1].ravel().tolist(), self.same_branch[-1].ravel().tolist(), atol=1e-7)
+        assert_allclose(
+            same_branch[0].ravel().tolist(),
+            self.same_branch[0].ravel().tolist(),
+            atol=1e-7,
+        )
+        assert_allclose(
+            same_branch[1].ravel().tolist(),
+            self.same_branch[1].ravel().tolist(),
+            atol=1e-7,
+        )
+        assert_allclose(
+            same_branch[3].ravel().tolist(),
+            self.same_branch[3].ravel().tolist(),
+            atol=1e-7,
+        )
+        assert_allclose(
+            same_branch[-1].ravel().tolist(),
+            self.same_branch[-1].ravel().tolist(),
+            atol=1e-7,
+        )
         # This will differ only slightly
         same_branch = self.polarization.get_same_branch_polarization_data(
             convert_to_muC_per_cm2=True, all_in_polar=True
@@ -241,8 +258,8 @@ class TestPolarization(PymatgenTest):
         assert_allclose(self.smoothness_all_in_polar, smoothness)
 
 
-class TestEnergyTrend(PymatgenTest):
-    def setUp(self):
+class TestEnergyTrend(MatSciTest):
+    def setup_method(self):
         self.energies = [
             -7.97738049,
             -7.988621176,

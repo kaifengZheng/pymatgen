@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 from monty.io import zopen
 from monty.json import MSONable
+
 from pymatgen.core import Lattice, Structure
 from pymatgen.symmetry.kpath import KPathSeek
 
 if TYPE_CHECKING:
-    from pymatgen.util.typing import PathLike
     from typing_extensions import Self
+
+    from pymatgen.util.typing import PathLike
 
 __author__ = "Hanyu Liu"
 __email__ = "domainofbuaa@gmail.com"
@@ -34,7 +36,7 @@ class LineLocator(MSONable):
         """
         row_idxs: list[int] = []  # starts from 1 to be compatible with linecache package
         row_no: int = 0
-        with zopen(file_path, mode="rt") as file:
+        with zopen(file_path, mode="rt", encoding="utf-8") as file:
             for row_content in file:
                 row_no += 1
                 if content.upper() in row_content.upper() and (
@@ -134,7 +136,7 @@ class ACExtractor(ACExtractorBase):
         """
         content = "POSITION"
         idx_row = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[0]
-        with open(self.atom_config_path) as file:
+        with open(self.atom_config_path, encoding="utf-8") as file:
             atom_config_content = file.readlines()
         atomic_numbers_content = atom_config_content[idx_row : idx_row + self.n_atoms]
         atomic_numbers_lst = [int(row.split()[0]) for row in atomic_numbers_content]  # convert str to int
@@ -149,7 +151,7 @@ class ACExtractor(ACExtractorBase):
         coords_lst: list[np.ndarray] = []
         content: str = "POSITION"
         idx_row: int = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[0]
-        with open(self.atom_config_path) as file:
+        with open(self.atom_config_path, encoding="utf-8") as file:
             atom_config_content = file.readlines()
         """
         row_content:
@@ -172,7 +174,7 @@ class ACExtractor(ACExtractorBase):
         try:  # Error: not containing magmoms info.
             idx_row = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[-1]
 
-            with open(self.atom_config_path) as file:
+            with open(self.atom_config_path, encoding="utf-8") as file:
                 atom_config_content = file.readlines()
 
             magnetic_moments_content = atom_config_content[idx_row : idx_row + self.n_atoms]
@@ -345,7 +347,11 @@ class ACstrExtractor(ACExtractorBase):
         for tmp_idx in [aim_idx + 1, aim_idx + 2, aim_idx + 3]:
             # tmp_str_lst = ['0.120972E+02', '0.483925E+01', '0.242063E+01']
             tmp_str_lst = self.strs_lst[tmp_idx].split()[-3:]
-            virial_tensor += (float(tmp_str_lst[0]), float(tmp_str_lst[1]), float(tmp_str_lst[2]))
+            virial_tensor += (
+                float(tmp_str_lst[0]),
+                float(tmp_str_lst[1]),
+                float(tmp_str_lst[2]),
+            )
 
         return np.array(virial_tensor)
 
@@ -397,7 +403,7 @@ class AtomConfig(MSONable):
         if mag:
             magmoms = ac_extractor.get_magmoms()
             for idx, tmp_site in enumerate(structure):
-                tmp_site.properties.update({"magmom": magmoms[idx]})
+                tmp_site.properties |= {"magmom": magmoms[idx]}
 
         return cls(structure)
 
@@ -412,7 +418,7 @@ class AtomConfig(MSONable):
         Returns:
             AtomConfig object.
         """
-        with zopen(filename, "rt") as file:
+        with zopen(filename, mode="rt", encoding="utf-8") as file:
             return cls.from_str(data=file.read(), mag=mag)
 
     @classmethod
@@ -460,7 +466,7 @@ class AtomConfig(MSONable):
 
     def write_file(self, filename: PathLike, **kwargs):
         """Write AtomConfig to a file."""
-        with zopen(filename, "wt") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(self.get_str(**kwargs))
 
     def as_dict(self):
@@ -489,15 +495,15 @@ class GenKpt(MSONable):
         """Initialization function.
 
         Args:
-            reciprocal_lattice (np.array): Reciprocal lattice with factor of 2*pi.
+            reciprocal_lattice (NDArray): Reciprocal lattice with factor of 2*pi.
             kpoints (dict[str, np.array]): Kpoints and their corresponding fractional coordinates.
             kpath (list[list[str]]): All kpaths, with each list representing one kpath.
             density (float): The density of kpoints mesh with factor of 2*pi.
         """
         self.reciprocal_lattice: np.ndarray = reciprocal_lattice
         self.kpath: dict = {}
-        self.kpath.update({"kpoints": kpoints})
-        self.kpath.update({"path": path})
+        self.kpath |= {"kpoints": kpoints}
+        self.kpath |= {"path": path}
         self.density = density
 
     @classmethod
@@ -515,7 +521,7 @@ class GenKpt(MSONable):
             kpts_2d: dict[str, np.ndarray] = {}
             for tmp_name, tmp_kpt in kpath_set.kpath["kpoints"].items():
                 if (tmp_kpt[2]) == 0:
-                    kpts_2d.update({tmp_name: tmp_kpt})
+                    kpts_2d |= {tmp_name: tmp_kpt}
 
             path_2d: list[list[str]] = []
             for tmp_path in kpath_set.kpath["path"]:
@@ -547,10 +553,12 @@ class GenKpt(MSONable):
                 float: The distance between two high symmetry points. With factor of 2*pi.
             """
             hsp1_coord: np.ndarray = np.dot(
-                np.array(self.kpath["kpoints"][hsp1]).reshape(1, 3), self.reciprocal_lattice
+                np.array(self.kpath["kpoints"][hsp1]).reshape(1, 3),
+                self.reciprocal_lattice,
             )
             hsp2_coord: np.ndarray = np.dot(
-                np.array(self.kpath["kpoints"][hsp2]).reshape(1, 3), self.reciprocal_lattice
+                np.array(self.kpath["kpoints"][hsp2]).reshape(1, 3),
+                self.reciprocal_lattice,
             )
             return float(np.linalg.norm(hsp2_coord - hsp1_coord))
 
@@ -580,14 +588,20 @@ class GenKpt(MSONable):
         Args:
             filename (PathLike): The absolute path of file to be written.
         """
-        with zopen(filename, "wt") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(self.get_str())
 
 
 class HighSymmetryPoint(MSONable):
     """Read and write HIGH_SYMMETRY_POINTS file which generate line-mode kpoints."""
 
-    def __init__(self, reciprocal_lattice: np.ndarray, kpts: dict[str, list], path: list[list[str]], density: float):
+    def __init__(
+        self,
+        reciprocal_lattice: np.ndarray,
+        kpts: dict[str, list],
+        path: list[list[str]],
+        density: float,
+    ):
         """Initialization function.
 
         Args:
@@ -598,8 +612,8 @@ class HighSymmetryPoint(MSONable):
         """
         self.reciprocal_lattice: np.ndarray = reciprocal_lattice
         self.kpath: dict = {}
-        self.kpath.update({"kpoints": kpts})
-        self.kpath.update({"path": path})
+        self.kpath |= {"kpoints": kpts}
+        self.kpath |= {"path": path}
         self.density = density
 
     @classmethod
@@ -614,7 +628,12 @@ class HighSymmetryPoint(MSONable):
         """
         reciprocal_lattice: np.ndarray = structure.lattice.reciprocal_lattice.matrix
         gen_kpt = GenKpt.from_structure(structure=structure, dim=dim, density=density)
-        return cls(reciprocal_lattice, gen_kpt.kpath["kpoints"], gen_kpt.kpath["path"], density * 2 * np.pi)
+        return cls(
+            reciprocal_lattice,
+            gen_kpt.kpath["kpoints"],
+            gen_kpt.kpath["path"],
+            density * 2 * np.pi,
+        )
 
     def get_str(self) -> str:
         """Get a string describing high symmetry points in HIGH_SYMMETRY_POINTS format."""
@@ -626,10 +645,12 @@ class HighSymmetryPoint(MSONable):
                 float: The distance between two high symmetry points with factor of 2*pi.
             """
             hsp1_coord: np.ndarray = np.dot(
-                np.array(self.kpath["kpoints"][hsp1]).reshape(1, 3), self.reciprocal_lattice
+                np.array(self.kpath["kpoints"][hsp1]).reshape(1, 3),
+                self.reciprocal_lattice,
             )
             hsp2_coord: np.ndarray = np.dot(
-                np.array(self.kpath["kpoints"][hsp2]).reshape(1, 3), self.reciprocal_lattice
+                np.array(self.kpath["kpoints"][hsp2]).reshape(1, 3),
+                self.reciprocal_lattice,
             )
             return float(np.linalg.norm(hsp2_coord - hsp1_coord))
 
@@ -673,5 +694,5 @@ class HighSymmetryPoint(MSONable):
 
     def write_file(self, filename: PathLike):
         """Write HighSymmetryPoint to a file."""
-        with zopen(filename, "wt") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(self.get_str())

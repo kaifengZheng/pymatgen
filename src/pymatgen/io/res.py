@@ -10,25 +10,26 @@ REM entries.
 
 from __future__ import annotations
 
-import datetime
 import re
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 from monty.io import zopen
 from monty.json import MSONable
+
 from pymatgen.core import Element, Lattice, PeriodicSite, Structure
 from pymatgen.entries.computed_entries import ComputedStructureEntry
 from pymatgen.io.core import ParseError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-    from datetime import date
+    from collections.abc import Callable, Iterator
     from pathlib import Path
-    from typing import Any, Callable, Literal
+    from typing import Any, Literal
+
+    from typing_extensions import Self
 
     from pymatgen.util.typing import Tuple3Ints, Vector3D
-    from typing_extensions import Self
 
 
 @dataclass(frozen=True)
@@ -149,7 +150,14 @@ class ResParser:
                 nmin = rest.find("n -")
                 nap = rest[nmin + 4 :]
             return AirssTITL(
-                seed, float(pressure), float(volume), float(energy), float(spin), float(abs_spin), spg, int(nap)
+                seed,
+                float(pressure),
+                float(volume),
+                float(energy),
+                float(spin),
+                float(abs_spin),
+                spg,
+                int(nap),
             )
         # there should at least be the first 6 fields if it's an AIRSS res file
         # if it doesn't have them, then just stop looking
@@ -241,7 +249,7 @@ class ResParser:
     def _parse_file(cls, filename: str | Path) -> Res:
         """Parse the res file as a file."""
         self = cls()
-        with zopen(filename, mode="r") as file:
+        with zopen(filename, mode="rt", encoding="utf-8") as file:
             self.source = file.read()
             return self._parse_txt()
 
@@ -252,7 +260,15 @@ class ResWriter:
     @classmethod
     def _cell_from_lattice(cls, lattice: Lattice) -> ResCELL:
         """Produce CELL entry from a pymatgen Lattice."""
-        return ResCELL(1.0, lattice.a, lattice.b, lattice.c, lattice.alpha, lattice.beta, lattice.gamma)
+        return ResCELL(
+            1.0,
+            lattice.a,
+            lattice.b,
+            lattice.c,
+            lattice.alpha,
+            lattice.beta,
+            lattice.gamma,
+        )
 
     @classmethod
     def _sfac_from_sites(cls, sites: list[PeriodicSite]) -> ResSFAC:
@@ -278,19 +294,24 @@ class ResWriter:
     @classmethod
     def _res_from_structure(cls, structure: Structure) -> Res:
         """Produce a res file structure from a pymatgen Structure."""
-        return Res(None, [], cls._cell_from_lattice(structure.lattice), cls._sfac_from_sites(list(structure)))
+        return Res(
+            None,
+            [],
+            cls._cell_from_lattice(structure.lattice),
+            cls._sfac_from_sites(list(structure)),
+        )
 
     @classmethod
     def _res_from_entry(cls, entry: ComputedStructureEntry) -> Res:
         """Produce a res file structure from a pymatgen ComputedStructureEntry."""
         seed = entry.data.get("seed") or str(hash(entry))
-        pres = float(entry.data.get("pressure", 0))
+        pressure = float(entry.data.get("pressure", 0))
         isd = float(entry.data.get("isd", 0))
         iasd = float(entry.data.get("iasd", 0))
         spg, _ = entry.structure.get_space_group_info()
         rems = [str(x) for x in entry.data.get("rems", [])]
         return Res(
-            AirssTITL(seed, pres, entry.structure.volume, entry.energy, isd, iasd, spg, 1),
+            AirssTITL(seed, pressure, entry.structure.volume, entry.energy, isd, iasd, spg, 1),
             rems,
             cls._cell_from_lattice(entry.structure.lattice),
             cls._sfac_from_sites(list(entry.structure)),
@@ -314,7 +335,7 @@ class ResWriter:
 
     def write(self, filename: str) -> None:
         """Write the res data to a file."""
-        with zopen(filename, mode="w") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(str(self))
 
 
@@ -419,9 +440,9 @@ class AirssProvider(ResProvider):
             raise ResParseError(f"Could not parse the date from {string=}.")
 
         day, month, year, *_ = match.groups()
-        month_num = datetime.datetime.strptime(month, "%b").replace(tzinfo=datetime.timezone.utc).month
+        month_num = datetime.strptime(month, "%b").replace(tzinfo=timezone.utc).month
 
-        return datetime.date(int(year), month_num, int(day))
+        return date(int(year), month_num, int(day))
 
     def _raise_or_none(self, err: ResParseError) -> None:
         if self.parse_rems != "strict":
@@ -486,7 +507,9 @@ class AirssProvider(ResProvider):
         self._raise_or_none(ResParseError("Could not find line with cut-off energy."))
         return None
 
-    def get_mpgrid_offset_nkpts_spacing(self) -> tuple[Tuple3Ints, Vector3D, int, float] | None:
+    def get_mpgrid_offset_nkpts_spacing(
+        self,
+    ) -> tuple[Tuple3Ints, Vector3D, int, float] | None:
         """
         Retrieves the MP grid, the grid offsets, number of kpoints, and maximum kpoint spacing.
 

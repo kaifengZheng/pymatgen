@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import palettable.colorbrewer.diverging
 from matplotlib import cm, colors
+
 from pymatgen.core import Element
 
 if TYPE_CHECKING:
@@ -92,10 +93,10 @@ def pretty_plot_two_axis(
     examples. Makes it easier to create plots with different axes.
 
     Args:
-        x (np.ndarray/list): Data for x-axis.
-        y1 (dict/np.ndarray/list): Data for y1 axis (left). If a dict, it will
+        x (Sequence[float]): Data for x-axis.
+        y1 (Sequence[float] | dict[str, Sequence[float]]): Data for y1 axis (left). If a dict, it will
             be interpreted as a {label: sequence}.
-        y2 (dict/np.ndarray/list): Data for y2 axis (right). If a dict, it will
+        y2 (Sequence[float] | dict[str, Sequence[float]]): Data for y2 axis (right). If a dict, it will
             be interpreted as a {label: sequence}.
         xlabel (str): If not None, this will be the label for the x-axis.
         y1label (str): If not None, this will be the label for the y1-axis.
@@ -130,7 +131,15 @@ def pretty_plot_two_axis(
         fig.set_dpi(dpi)
     if isinstance(y1, dict):
         for idx, (key, val) in enumerate(y1.items()):
-            ax1.plot(x, val, c=c1, marker="s", ls=styles[idx % len(styles)], label=key, **plot_kwargs)
+            ax1.plot(
+                x,
+                val,
+                c=c1,
+                marker="s",
+                ls=styles[idx % len(styles)],
+                label=key,
+                **plot_kwargs,
+            )
         ax1.legend(fontsize=label_size)
     else:
         ax1.plot(x, y1, c=c1, marker="s", ls="-", **plot_kwargs)
@@ -173,7 +182,7 @@ def pretty_polyfit_plot(x: ArrayLike, y: ArrayLike, deg: int = 1, xlabel=None, y
         kwargs: Keyword args passed to pretty_plot.
 
     Returns:
-        matplotlib.pyplot object.
+        plt.Axes
     """
     ax = pretty_plot(**kwargs)
     pp = np.polyfit(x, y, deg)
@@ -259,8 +268,8 @@ def periodic_table_heatmap(
                 kwargs.setdefault("color_bar", {}).setdefault("title", cbar_label)
                 print('cbar_label is deprecated, use color_bar={"title": cbar_label} instead')
             if cbar_label_size != 14:
-                kwargs.setdefault("color_bar", {}).setdefault("titlefont", {}).setdefault("size", cbar_label_size)
-                print('cbar_label_size is deprecated, use color_bar={"titlefont": {"size": cbar_label_size}} instead')
+                kwargs.setdefault("color_bar", {}).setdefault("title.font", {}).setdefault("size", cbar_label_size)
+                print('cbar_label_size is deprecated, use color_bar={"title.font": {"size": cbar_label_size}} instead')
             if cmap:
                 kwargs.setdefault("colorscale", cmap)
                 print("cmap is deprecated, use colorscale=cmap instead")
@@ -443,7 +452,12 @@ def van_arkel_triangle(list_of_materials: Sequence, annotate: bool = True):
     pt1 = np.array([(Element("F").X + Element("Fr").X) / 2, abs(Element("F").X - Element("Fr").X)])
     # Cs-Fr has the lowest average X. We set this as our
     # bottom left corner of the triangle (most metallic)
-    pt2 = np.array([(Element("Cs").X + Element("Fr").X) / 2, abs(Element("Cs").X - Element("Fr").X)])
+    pt2 = np.array(
+        [
+            (Element("Cs").X + Element("Fr").X) / 2,
+            abs(Element("Cs").X - Element("Fr").X),
+        ]
+    )
     # O-F has the highest average X. We set this as our
     # bottom right corner of the triangle (most covalent)
     pt3 = np.array([(Element("O").X + Element("F").X) / 2, abs(Element("O").X - Element("F").X)])
@@ -675,7 +689,7 @@ def add_fig_kwargs(func):
             tags = ascii_letters
             if len(fig.axes) > len(tags):
                 tags = (1 + len(ascii_letters) // len(fig.axes)) * ascii_letters
-            for ax, tag in zip(fig.axes, tags):
+            for ax, tag in zip(fig.axes, tags, strict=True):
                 ax.annotate(f"({tag})", xy=(0.05, 0.95), xycoords="axes fraction")
 
         if tight_layout:
@@ -711,7 +725,7 @@ def add_fig_kwargs(func):
         tight_layout      True to call fig.tight_layout (default: False)
         ax_grid           True (False) to add (remove) grid from all axes in fig.
                           Default: None i.e. fig is left unchanged.
-        ax_annotate       Add labels to  subplots e.g. (a), (b).
+        ax_annotate       Add labels to subplots e.g. (a), (b).
                           Default: False
         fig_close         Close figure. Default: False.
         ================  ====================================================

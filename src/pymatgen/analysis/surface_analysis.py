@@ -36,12 +36,14 @@ from __future__ import annotations
 
 import copy
 import itertools
-import random
 import warnings
 from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
+from sympy import Symbol
+from sympy.solvers import linsolve, solve
+
 from pymatgen.analysis.wulff import WulffShape
 from pymatgen.core import Structure
 from pymatgen.core.composition import Composition
@@ -51,12 +53,11 @@ from pymatgen.io.vasp.outputs import Locpot, Outcar
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.util.due import Doi, due
 from pymatgen.util.plotting import pretty_plot
-from sympy import Symbol
-from sympy.solvers import linsolve, solve
 
 if TYPE_CHECKING:
-    from pymatgen.util.typing import Tuple3Ints
     from typing_extensions import Self
+
+    from pymatgen.util.typing import Tuple3Ints
 
 EV_PER_ANG2_TO_JOULES_PER_M2 = 16.0217656
 
@@ -192,7 +193,7 @@ class SlabEntry(ComputedStructureEntry):
         if slab_clean_comp.reduced_composition != ucell_entry.composition.reduced_composition:
             list_els = [next(iter(entry.composition.as_dict())) for entry in ref_entries]
             if not any(el in list_els for el in ucell_entry.composition.as_dict()):
-                warnings.warn("Elemental references missing for the non-dopant species.")
+                warnings.warn("Elemental references missing for the non-dopant species.", stacklevel=2)
 
         gamma = (Symbol("E_surf") - Symbol("Ebulk")) / (2 * Symbol("A"))
         ucell_comp = ucell_entry.composition
@@ -325,7 +326,13 @@ class SlabEntry(ComputedStructureEntry):
 
     @classmethod
     def from_computed_structure_entry(
-        cls, entry, miller_index, label=None, adsorbates=None, clean_entry=None, **kwargs
+        cls,
+        entry,
+        miller_index,
+        label=None,
+        adsorbates=None,
+        clean_entry=None,
+        **kwargs,
     ) -> Self:
         """Get SlabEntry from a ComputedStructureEntry."""
         return cls(
@@ -652,7 +659,7 @@ class SurfaceEnergyPlotter:
 
         solution = linsolve(all_eqns, all_parameters)
         if not solution:
-            warnings.warn("No solution")
+            warnings.warn("No solution", stacklevel=2)
             return solution
         return {param: next(iter(solution))[idx] for idx, param in enumerate(all_parameters)}
 
@@ -779,7 +786,7 @@ class SurfaceEnergyPlotter:
 
         # sort the chempot ranges for each facet
         for entry, v in stable_urange_dict.items():
-            se_dict[entry] = [se for idx, se in sorted(zip(v, se_dict[entry]))]
+            se_dict[entry] = [se for idx, se in sorted(zip(v, se_dict[entry], strict=True))]
             stable_urange_dict[entry] = sorted(v)
 
         if return_se_dict:
@@ -799,14 +806,15 @@ class SurfaceEnergyPlotter:
             surface will be transparent.
         """
         color_dict = {}
+        rng = np.random.default_rng()
         for hkl in self.all_slab_entries:
             rgb_indices = [0, 1, 2]
             color = [0, 0, 0, 1]
-            random.shuffle(rgb_indices)
+            rng.shuffle(rgb_indices)
             for idx, ind in enumerate(rgb_indices):
                 if idx == 2:
                     break
-                color[ind] = np.random.uniform(0, 1)
+                color[ind] = rng.uniform(0, 1)
 
             # Get the clean (solid) colors first
             clean_list = np.linspace(0, 1, len(self.all_slab_entries[hkl]))
@@ -948,7 +956,11 @@ class SurfaceEnergyPlotter:
             # want to show the region where each slab is stable
             if not show_unstable:
                 stable_u_range_dict = self.stable_u_range_dict(
-                    chempot_range, ref_delu, no_doped=no_doped, delu_dict=delu_dict, miller_index=hkl
+                    chempot_range,
+                    ref_delu,
+                    no_doped=no_doped,
+                    delu_dict=delu_dict,
+                    miller_index=hkl,
                 )
             else:
                 stable_u_range_dict = {}
@@ -1001,7 +1013,7 @@ class SurfaceEnergyPlotter:
                             )
 
         # Make the figure look nice
-        plt.ylabel(r"Surface energy (J/$m^{2}$)") if JPERM2 else plt.ylabel(r"Surface energy (eV/$\AA^{2}$)")
+        (plt.ylabel(r"Surface energy (J/$m^{2}$)") if JPERM2 else plt.ylabel(r"Surface energy (eV/$\AA^{2}$)"))
         return self.chempot_plot_addons(plt, chempot_range, str(ref_delu).split("_")[1], axes, ylim=ylim)
 
     def monolayer_vs_BE(self, plot_eads=False):
@@ -1027,12 +1039,11 @@ class SurfaceEnergyPlotter:
                         if ads_entry.get_monolayer not in ml_be_dict:
                             ml_be_dict[ads_entry.get_monolayer] = 1000
                         be = ads_entry.gibbs_binding_energy(eads=plot_eads)
-                        if be < ml_be_dict[ads_entry.get_monolayer]:
-                            ml_be_dict[ads_entry.get_monolayer] = be
+                        ml_be_dict[ads_entry.get_monolayer] = min(be, ml_be_dict[ads_entry.get_monolayer])
             # sort the binding energies and monolayers
             # in order to properly draw a line plot
             vals = sorted(ml_be_dict.items())
-            monolayers, BEs = zip(*vals)
+            monolayers, BEs = zip(*vals, strict=True)
             ax.plot(monolayers, BEs, "-o", c=self.color_dict[clean_entry], label=hkl)
 
         adsorbates = tuple(ads_entry.ads_entries_dict)
@@ -1446,7 +1457,7 @@ class WorkFunctionAnalyzer:
             else:
                 yg.append(pot)
                 xg.append(self.along_c[idx])
-        xg, yg = zip(*sorted(zip(xg, yg)))
+        xg, yg = zip(*sorted(zip(xg, yg, strict=True)), strict=True)
         plt.plot(xg, yg, "r", linewidth=2.5, zorder=-1)
 
         # make it look nice

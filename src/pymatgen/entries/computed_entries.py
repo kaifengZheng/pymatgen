@@ -17,26 +17,28 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from monty.json import MontyDecoder, MontyEncoder, MSONable
+from scipy.interpolate import interp1d
+from uncertainties import ufloat
+
 from pymatgen.core.composition import Composition
 from pymatgen.entries import Entry
 from pymatgen.util.due import Doi, due
-from scipy.interpolate import interp1d
-from uncertainties import ufloat
 
 if TYPE_CHECKING:
     from typing import Literal
 
-    from pymatgen.core import Structure
     from typing_extensions import Self
+
+    from pymatgen.core import Structure
 
 __author__ = "Ryan Kingsbury, Matt McDermott, Shyue Ping Ong, Anubhav Jain"
 __copyright__ = "Copyright 2011-2020, The Materials Project"
 __version__ = "1.1"
 __date__ = "April 2020"
 
-with open(os.path.join(os.path.dirname(__file__), "data/g_els.json")) as file:
+with open(os.path.join(os.path.dirname(__file__), "data/g_els.json"), encoding="utf-8") as file:
     G_ELEMS = json.load(file)
-with open(os.path.join(os.path.dirname(__file__), "data/nist_gas_gf.json")) as file:
+with open(os.path.join(os.path.dirname(__file__), "data/nist_gas_gf.json"), encoding="utf-8") as file:
     G_GASES = json.load(file)
 
 
@@ -92,7 +94,12 @@ class EnergyAdjustment(MSONable):
         """Return an explanation of how the energy adjustment is calculated."""
 
     def __repr__(self):
-        name, value, uncertainty, description = self.name, float(self.value), self.uncertainty, self.description
+        name, value, uncertainty, description = (
+            self.name,
+            float(self.value),
+            self.uncertainty,
+            self.description,
+        )
         # self.cls might not be a dict if monty decoding is enabled in the new MPRester
         # which hydrates all dicts with @class and @module keys into classes in which case
         # we expect a Compatibility subclass
@@ -381,7 +388,7 @@ class ComputedEntry(Entry):
         """
         # adds to ufloat(0.0, 0.0) to ensure that no corrections still result in ufloat object
         unc = ufloat(0.0, 0.0) + sum(
-            ufloat(ea.value, ea.uncertainty) if not np.isnan(ea.uncertainty) else ufloat(ea.value, 0)
+            (ufloat(ea.value, ea.uncertainty) if not np.isnan(ea.uncertainty) else ufloat(ea.value, 0))
             for ea in self.energy_adjustments
         )
 
@@ -453,7 +460,7 @@ class ComputedEntry(Entry):
         if not all(hasattr(other, attr) for attr in needed_attrs):
             return NotImplemented
 
-        other = cast(ComputedEntry, other)
+        other = cast("ComputedEntry", other)
 
         # Equality is defined based on composition and energy.
         # If structures are involved, it is assumed that a {composition, energy} is
@@ -462,7 +469,7 @@ class ComputedEntry(Entry):
         # However, if entry_id is same, they may have different corrections (e.g., due
         # to mixing scheme used) and thus should be compared on corrected energy.
 
-        if getattr(self, "entry_id", None) and getattr(other, "entry_id", None) and self.entry_id != other.entry_id:
+        if getattr(self, "entry_id", False) and getattr(other, "entry_id", False) and self.entry_id != other.entry_id:
             return False
 
         if not math.isclose(self.energy, other.energy):
@@ -506,15 +513,13 @@ class ComputedEntry(Entry):
     def as_dict(self) -> dict:
         """MSONable dict."""
         return_dict = super().as_dict()
-        return_dict.update(
-            {
-                "entry_id": self.entry_id,
-                "correction": self.correction,
-                "energy_adjustments": json.loads(json.dumps(self.energy_adjustments, cls=MontyEncoder)),
-                "parameters": json.loads(json.dumps(self.parameters, cls=MontyEncoder)),
-                "data": json.loads(json.dumps(self.data, cls=MontyEncoder)),
-            }
-        )
+        return_dict |= {
+            "entry_id": self.entry_id,
+            "correction": self.correction,
+            "energy_adjustments": json.loads(json.dumps(self.energy_adjustments, cls=MontyEncoder)),
+            "parameters": json.loads(json.dumps(self.parameters, cls=MontyEncoder)),
+            "data": json.loads(json.dumps(self.data, cls=MontyEncoder)),
+        }
         return return_dict
 
     def __hash__(self) -> int:
@@ -575,7 +580,11 @@ class ComputedStructureEntry(ComputedEntry):
             entry_id: An optional id to uniquely identify the entry.
         """
         if composition:
-            composition = Composition(composition)
+            if isinstance(composition, Composition):
+                pass
+            else:
+                composition = Composition(composition)
+            # composition = Composition(composition)
             if (
                 composition.get_integer_formula_and_factor()[0]
                 != structure.composition.get_integer_formula_and_factor()[0]
@@ -656,7 +665,8 @@ class ComputedStructureEntry(ComputedEntry):
         warnings.warn(
             f"Normalization of a `{type(self).__name__}` makes "
             "`self.composition` and `self.structure.composition` inconsistent"
-            " - please use self.composition for all further calculations."
+            " - please use self.composition for all further calculations.",
+            stacklevel=2,
         )
         # TODO: find a better solution for creating copies instead of as/from dict
         factor = self._normalization_factor(mode)
@@ -824,7 +834,7 @@ class GibbsComputedStructureEntry(ComputedStructureEntry):
                 )
                 sum_g_i += amt * g_interp(self.temp)
         else:
-            sum_g_i = sum(amt * G_ELEMS[str(self.temp)][elem] for elem, amt in elems.items())
+            sum_g_i = sum(amt * G_ELEMS[str(int(self.temp))][elem] for elem, amt in elems.items())
 
         return sum_g_i
 

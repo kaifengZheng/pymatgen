@@ -9,6 +9,7 @@ from string import Template
 from typing import TYPE_CHECKING
 
 from monty.io import zopen
+
 from pymatgen.io.core import InputGenerator, InputSet
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ class TemplateInputGen(InputGenerator):
         self.filename = str(filename)
 
         # Load the template
-        with zopen(self.template, mode="r") as file:
+        with zopen(self.template, mode="rt", encoding="utf-8") as file:
             template_str = file.read()
 
         # Replace all variables

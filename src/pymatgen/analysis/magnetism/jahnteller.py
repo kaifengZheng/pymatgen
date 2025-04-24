@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
+
 from pymatgen.analysis.bond_valence import BVAnalyzer
 from pymatgen.analysis.local_env import LocalStructOrderParams, get_neighbors_of_site_with_index
 from pymatgen.core import Species, get_el_sp
@@ -140,7 +142,7 @@ class JahnTellerAnalyzer:
                     motif_order_parameter = None
 
                 if motif in ["oct", "tet"]:
-                    motif = cast(Literal["oct", "tet"], motif)  # mypy needs help
+                    motif = cast("Literal['oct', 'tet']", motif)  # mypy needs help
 
                     # guess spin of metal ion
                     if guesstimate_spin and "magmom" in site.properties:
@@ -271,7 +273,7 @@ class JahnTellerAnalyzer:
                 quite distorted, this threshold is smaller than one might expect
 
         Returns:
-            boolean, True if might be Jahn-Teller active, False if not
+            bool: True if might be Jahn-Teller active, False if not
         """
         active = False
 
@@ -284,7 +286,7 @@ class JahnTellerAnalyzer:
             )
             active = analysis["active"]
         except Exception as exc:
-            warnings.warn(f"Error analyzing {structure.reduced_formula}: {exc}")
+            warnings.warn(f"Error analyzing {structure.reduced_formula}: {exc}", stacklevel=2)
 
         return active
 
@@ -328,7 +330,7 @@ class JahnTellerAnalyzer:
                         structure.add_site_property("possible_jt_active", jt_sites)
             return structure
         except Exception as exc:
-            warnings.warn(f"Error analyzing {structure.reduced_formula}: {exc}")
+            warnings.warn(f"Error analyzing {structure.reduced_formula}: {exc}", stacklevel=2)
             return structure
 
     @staticmethod
@@ -378,7 +380,7 @@ class JahnTellerAnalyzer:
                 spin_config = self.spin_configs[motif][d_electrons][spin_state]
                 magnitude = JahnTellerAnalyzer.get_magnitude_of_effect_from_spin_config(motif, spin_config)
         else:
-            warnings.warn("No data for this species.")
+            warnings.warn("No data for this species.", stacklevel=2)
 
         return magnitude
 
@@ -443,14 +445,18 @@ class JahnTellerAnalyzer:
         # WARNING! this heuristic has not been robustly tested or benchmarked
         # using 'diff*0.25' as arbitrary measure, if known magmom is
         # too far away from expected value, we don't try to classify it
-        if known_magmom > mu_so_high or abs(mu_so_high - known_magmom) < diff * 0.25:
+        if known_magmom > mu_so_high or math.isclose(mu_so_high, known_magmom, abs_tol=diff * 0.25, rel_tol=0):
             return "high"
-        if known_magmom < mu_so_low or abs(mu_so_low - known_magmom) < diff * 0.25:
+        if known_magmom < mu_so_low or math.isclose(mu_so_low, known_magmom, abs_tol=diff * 0.25, rel_tol=0):
             return "low"
         return "unknown"
 
     @staticmethod
-    def mu_so(species: str | Species, motif: Literal["oct", "tet"], spin_state: Literal["high", "low"]) -> float | None:
+    def mu_so(
+        species: str | Species,
+        motif: Literal["oct", "tet"],
+        spin_state: Literal["high", "low"],
+    ) -> float | None:
         """Calculate the spin-only magnetic moment for a given species. Only supports transition metals.
 
         Args:

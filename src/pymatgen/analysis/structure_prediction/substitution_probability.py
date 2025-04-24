@@ -13,11 +13,14 @@ from operator import mul
 from typing import TYPE_CHECKING
 
 from monty.design_patterns import cached_class
+
 from pymatgen.core import Species, get_el_sp
 from pymatgen.util.due import Doi, due
 
 if TYPE_CHECKING:
     from typing_extensions import Self
+
+    from pymatgen.util.typing import SpeciesLike
 
 __author__ = "Will Richards, Geoffroy Hautier"
 __copyright__ = "Copyright 2012, The Materials Project"
@@ -25,6 +28,8 @@ __version__ = "1.2"
 __maintainer__ = "Will Richards"
 __email__ = "wrichard@mit.edu"
 __date__ = "Aug 31, 2012"
+
+logger = logging.getLogger(__name__)
 
 
 @due.dcite(
@@ -56,7 +61,7 @@ class SubstitutionProbability:
         else:
             module_dir = os.path.dirname(__file__)
             json_file = f"{module_dir}/data/lambda.json"
-            with open(json_file) as file:
+            with open(json_file, encoding="utf-8") as file:
                 self._lambda_table = json.load(file)
 
         # build map of specie pairs to lambdas
@@ -73,7 +78,7 @@ class SubstitutionProbability:
 
         # create Z and px
         self.Z = 0
-        self._px: dict[Species, float] = defaultdict(float)
+        self._px: dict[SpeciesLike, float] = defaultdict(float)
         for s1, s2 in itertools.product(self.species, repeat=2):
             value = math.exp(self.get_lambda(s1, s2))
             self._px[s1] += value / 2
@@ -83,8 +88,8 @@ class SubstitutionProbability:
     def get_lambda(self, s1, s2):
         """
         Args:
-            s1 (Element/Species/str/int): Describes Ion in 1st Structure
-            s2 (Element/Species/str/int): Describes Ion in 2nd Structure.
+            s1 (SpeciesLike): Ion in 1st structure.
+            s2 (SpeciesLike): Ion in 2nd structure.
 
         Returns:
             Lambda values
@@ -92,13 +97,13 @@ class SubstitutionProbability:
         key = frozenset([get_el_sp(s1), get_el_sp(s2)])
         return self._l.get(key, self.alpha)
 
-    def get_px(self, sp):
+    def get_px(self, sp: SpeciesLike) -> float:
         """
         Args:
-            sp (Species/Element): Species.
+            sp (SpeciesLike): Species.
 
         Returns:
-            Probability
+            float: Probability
         """
         return self._px[get_el_sp(sp)]
 
@@ -147,9 +152,10 @@ class SubstitutionProbability:
             The conditional probability (assuming these species are in
             l2)
         """
-        assert len(l1) == len(l2)
+        if len(l1) != len(l2):
+            raise ValueError("lengths of l1 and l2 mismatch.")
         p = 1
-        for s1, s2 in zip(l1, l2):
+        for s1, s2 in zip(l1, l2, strict=True):
             p *= self.cond_prob(s1, s2)
         return p
 
@@ -184,7 +190,7 @@ class SubstitutionPredictor:
     def __init__(self, lambda_table=None, alpha=-5, threshold=1e-3):
         """
         Args:
-            lambda_table (): Input lambda table.
+            lambda_table (dict): Input lambda table.
             alpha (float): weight function for never observed substitutions
             threshold (float): Threshold to use to identify high probability structures.
         """
@@ -228,9 +234,9 @@ class SubstitutionPredictor:
                 if len(output_species) == len(species):
                     odict = {"probability": functools.reduce(mul, best_case_prob)}
                     if to_this_composition:
-                        odict["substitutions"] = dict(zip(output_species, species))
+                        odict["substitutions"] = dict(zip(output_species, species, strict=True))
                     else:
-                        odict["substitutions"] = dict(zip(species, output_species))
+                        odict["substitutions"] = dict(zip(species, output_species, strict=True))
                     if len(output_species) == len(set(output_species)):
                         output.append(odict)
                     return
@@ -240,7 +246,7 @@ class SubstitutionPredictor:
                     _recurse([*output_prob, prob], [*output_species, sp])
 
         _recurse([], [])
-        logging.info(f"{len(output)} substitutions found")
+        logger.info(f"{len(output)} substitutions found")
         return output
 
     def composition_prediction(self, composition, to_this_composition=True):
@@ -271,5 +277,5 @@ class SubstitutionPredictor:
                 charge += subs[k].oxi_state * v
             if abs(charge) < 1e-8:
                 output.append(p)
-        logging.info(f"{len(output)} charge balanced substitutions found")
+        logger.info(f"{len(output)} charge balanced substitutions found")
         return output

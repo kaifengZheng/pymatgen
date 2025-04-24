@@ -7,10 +7,11 @@ Structure object in the pymatgen.electronic_structure.cohp.py module.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, no_type_check
+from typing import TYPE_CHECKING
 
 import numpy as np
 from monty.io import zopen
+
 from pymatgen.core.structure import Structure
 from pymatgen.core.units import Ry_to_eV, bohr_to_angstrom
 from pymatgen.electronic_structure.core import Spin
@@ -19,6 +20,7 @@ from pymatgen.util.num import round_to_sigfigs
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import Any
 
     from typing_extensions import Self
 
@@ -75,11 +77,11 @@ class LMTOCtrl:
             line += " ".join(str(round(v, sigfigs)) for v in latt)
             lines.append(line)
 
-        for cat in ["CLASS", "SITE"]:
+        for cat in ("CLASS", "SITE"):
             for a, atoms in enumerate(ctrl_dict[cat]):
                 lst = [cat.ljust(9)] if a == 0 else [" ".ljust(9)]
                 for token, val in sorted(atoms.items()):
-                    if token == "POS":
+                    if token == "POS":  # noqa: S105
                         lst.append("POS=" + " ".join(str(round(p, sigfigs)) for p in val))
                     else:
                         lst.append(f"{token}={val}")
@@ -107,7 +109,7 @@ class LMTOCtrl:
         # The following is to find the classes (atoms that are not symmetry equivalent,
         # and create labels. Note that LMTO only attaches numbers with the second atom
         # of the same species, e.g. "Bi", "Bi1", "Bi2", etc.
-        eq_atoms = sga.get_symmetry_dataset()["equivalent_atoms"]
+        eq_atoms = sga.get_symmetry_dataset().equivalent_atoms
         ineq_sites_index = list(set(eq_atoms))
         sites = []
         classes = []
@@ -125,14 +127,19 @@ class LMTOCtrl:
                 classes.append({"ATOM": atom.symbol, "Z": atom.Z})
             sites.append({"ATOM": classes[label_index]["ATOM"], "POS": site.coords / a_len})
 
-        update = {"ALAT": a_len / bohr_to_angstrom, "PLAT": plat, "CLASS": classes, "SITE": sites}
+        update = {
+            "ALAT": a_len / bohr_to_angstrom,
+            "PLAT": plat,
+            "CLASS": classes,
+            "SITE": sites,
+        }
         return {**ctrl_dict, **update}
 
     def write_file(self, filename="CTRL", **kwargs):
         """Write a CTRL file with structure, HEADER, and VERS that can be
         used as input for lmhart.run.
         """
-        with zopen(filename, mode="wt") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(self.get_str(**kwargs))
 
     @classmethod
@@ -146,12 +153,11 @@ class LMTOCtrl:
         Returns:
             An LMTOCtrl object.
         """
-        with zopen(filename, mode="rt") as file:
+        with zopen(filename, mode="rt", encoding="utf-8") as file:
             contents = file.read()
         return cls.from_str(contents, **kwargs)
 
     @classmethod
-    @no_type_check
     def from_str(cls, data: str, sigfigs: int = 8) -> Self:
         """
         Creates a CTRL file object from a string. This will mostly be
@@ -165,28 +171,44 @@ class LMTOCtrl:
             An LMTOCtrl object.
         """
         lines = data.split("\n")[:-1]
-        struct_lines = {"HEADER": [], "VERS": [], "SYMGRP": [], "STRUC": [], "CLASS": [], "SITE": []}
+        _struct_lines: dict[str, list] = {
+            "HEADER": [],
+            "VERS": [],
+            "SYMGRP": [],
+            "STRUC": [],  # codespell:ignore struc
+            "CLASS": [],
+            "SITE": [],
+        }
+
+        cat = None
         for line in lines:
             if line != "" and not line.isspace():
                 if not line[0].isspace():
                     cat = line.split()[0]
-                if cat in struct_lines:
-                    struct_lines[cat].append(line)
+                if cat in _struct_lines:
+                    _struct_lines[cat].append(line)
                 else:
                     pass
 
-        struct_lines = {k: " ".join(v).replace("= ", "=") for k, v in struct_lines.items()}
+        struct_lines: dict[str, str] = {k: " ".join(v).replace("= ", "=") for k, v in _struct_lines.items()}
 
-        structure_tokens = {"ALAT": None, "PLAT": [], "CLASS": [], "SITE": []}
+        structure_tokens: dict[str, Any] = {
+            "ALAT": None,
+            "PLAT": [],
+            "CLASS": [],
+            "SITE": [],
+        }
 
-        for cat in ["STRUC", "CLASS", "SITE"]:
+        atom = None
+        for cat in ("STRUC", "CLASS", "SITE"):  # codespell:ignore struc
             fields = struct_lines[cat].split("=")
             for idx, field in enumerate(fields):
                 token = field.split()[-1]
-                if token == "ALAT":
+                if token == "ALAT":  # noqa: S105
                     a_lat = round(float(fields[idx + 1].split()[0]), sigfigs)
                     structure_tokens["ALAT"] = a_lat
-                elif token == "ATOM":
+
+                elif token == "ATOM":  # noqa: S105
                     atom = fields[idx + 1].split()[0]
                     if not bool(re.match("E[0-9]*$", atom)):
                         if cat == "CLASS":
@@ -195,19 +217,22 @@ class LMTOCtrl:
                             structure_tokens["SITE"].append({"ATOM": atom})
                     else:
                         pass
-                elif token in ["PLAT", "POS"]:
+
+                elif token in {"PLAT", "POS"}:
                     try:
                         arr = np.array([round(float(i), sigfigs) for i in fields[idx + 1].split()])
                     except ValueError:
                         arr = np.array([round(float(i), sigfigs) for i in fields[idx + 1].split()[:-1]])
-                    if token == "PLAT":
+
+                    if token == "PLAT":  # noqa: S105
                         structure_tokens["PLAT"] = arr.reshape([3, 3])
-                    elif not bool(re.match("E[0-9]*$", atom)):
+                    elif atom is not None and not bool(re.match("E[0-9]*$", atom)):
                         structure_tokens["SITE"][-1]["POS"] = arr
                     else:
                         pass
                 else:
                     pass
+
         try:
             spc_grp_index = struct_lines["SYMGRP"].index("SPCGRP")
             spc_grp = struct_lines["SYMGRP"][spc_grp_index : spc_grp_index + 12]
@@ -215,13 +240,13 @@ class LMTOCtrl:
         except ValueError:
             pass
 
-        for token in ["HEADER", "VERS"]:
+        for token in ("HEADER", "VERS"):
             try:
                 value = re.split(token + r"\s*", struct_lines[token])[1]
                 structure_tokens[token] = value.strip()
             except IndexError:
                 pass
-        return LMTOCtrl.from_dict(structure_tokens)
+        return cls.from_dict(structure_tokens)
 
     @classmethod
     def from_dict(cls, dct: dict) -> Self:
@@ -263,7 +288,13 @@ class LMTOCtrl:
                     dct["SPCGRP"], plat, species, positions, coords_are_cartesian=True
                 )
             except ValueError:
-                structure = Structure(plat, species, positions, coords_are_cartesian=True, to_unit_cell=True)
+                structure = Structure(
+                    plat,
+                    species,
+                    positions,
+                    coords_are_cartesian=True,
+                    to_unit_cell=True,
+                )
         else:
             structure = Structure(plat, species, positions, coords_are_cartesian=True, to_unit_cell=True)
 
@@ -280,7 +311,7 @@ class LMTOCopl:
                 "length": bond length}
         efermi (float): The Fermi energy in Ry or eV.
         energies (list): Sequence of energies in Ry or eV.
-        is_spin_polarized (bool): Boolean to indicate if the calculation is spin polarized.
+        is_spin_polarized (bool): True if the calculation is spin-polarized.
     """
 
     def __init__(self, filename="COPL", to_eV=False):
@@ -291,7 +322,7 @@ class LMTOCopl:
               eV, set to True. Defaults to False for energies in Ry.
         """
         # COPL files have an extra trailing blank line
-        with zopen(filename, mode="rt") as file:
+        with zopen(filename, mode="rt", encoding="utf-8") as file:
             contents = file.read().split("\n")[:-1]
         # The parameters line is the second line in a COPL file. It
         # contains all parameters that are needed to map the file.
@@ -339,7 +370,12 @@ class LMTOCopl:
                     lab = f"{label}-{idx}"
                 label = lab
 
-            cohp_data[label] = {"COHP": cohp, "ICOHP": icohp, "length": length, "sites": sites}
+            cohp_data[label] = {
+                "COHP": cohp,
+                "ICOHP": icohp,
+                "length": length,
+                "sites": sites,
+            }
         self.cohp_data = cohp_data
 
     @staticmethod

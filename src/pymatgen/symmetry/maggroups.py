@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from monty.design_patterns import cached_class
+
 from pymatgen.core.operations import MagSymmOp
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.symmetry.groups import SymmetryGroup, in_array_list
@@ -20,8 +21,9 @@ from pymatgen.util.string import transformation_to_string
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from pymatgen.core.lattice import Lattice
     from typing_extensions import Self
+
+    from pymatgen.core.lattice import Lattice
 
 __author__ = "Matthew Horton, Shyue Ping Ong"
 
@@ -114,7 +116,10 @@ class MagneticSpaceGroup(SymmetryGroup):
             label = "".join(label.split())  # remove any white space
             c.execute("SELECT * FROM space_groups WHERE BNS_label=?;", (label,))
         elif isinstance(label, list):
-            c.execute("SELECT * FROM space_groups WHERE BNS1=? AND BNS2=?;", (label[0], label[1]))
+            c.execute(
+                "SELECT * FROM space_groups WHERE BNS1=? AND BNS2=?;",
+                (label[0], label[1]),
+            )
         elif isinstance(label, int):
             # OG3 index is a 'master' index, going from 1 to 1651
             c.execute("SELECT * FROM space_groups WHERE OG3=?;", (label,))
@@ -235,19 +240,15 @@ class MagneticSpaceGroup(SymmetryGroup):
                 return None
             raw_lattice = [b[i : i + 4] for i in range(0, len(b), 4)]
 
-            lattice = []
-
-            for r in raw_lattice:
-                lattice.append(
-                    {
-                        "vector": [r[0] / r[3], r[1] / r[3], r[2] / r[3]],
-                        "str": f"({Fraction(r[0] / r[3]).limit_denominator()},"
-                        f"{Fraction(r[1] / r[3]).limit_denominator()},"
-                        f"{Fraction(r[2] / r[3]).limit_denominator()})+",
-                    }
-                )
-
-            return lattice
+            return [
+                {
+                    "vector": [r[0] / r[3], r[1] / r[3], r[2] / r[3]],
+                    "str": f"({Fraction(r[0] / r[3]).limit_denominator()},"
+                    f"{Fraction(r[1] / r[3]).limit_denominator()},"
+                    f"{Fraction(r[2] / r[3]).limit_denominator()})+",
+                }
+                for r in raw_lattice
+            ]
 
         def _parse_transformation(b):
             """Parse compact binary representation into transformation between OG and BNS settings."""
@@ -356,7 +357,7 @@ class MagneticSpaceGroup(SymmetryGroup):
                     )
                     centered_ops.append(new_op)
 
-        ops = ops + centered_ops
+        ops += centered_ops
 
         # apply jones faithful transformation
         return [self.jf.transform_symmop(op) for op in ops]
@@ -393,8 +394,7 @@ class MagneticSpaceGroup(SymmetryGroup):
         Args:
             lattice (Lattice): A Lattice.
             tol (float): The tolerance to check for equality of lengths.
-            angle_tol (float): The tolerance to check for equality of angles
-                in degrees.
+            angle_tol (float): The tolerance to check for equality of angles in degrees.
 
         Returns:
             bool: True if the lattice is compatible with the conventional cell.
@@ -405,7 +405,7 @@ class MagneticSpaceGroup(SymmetryGroup):
         crys_system = self.crystal_system
 
         def check(param, ref, tolerance):
-            return all(abs(i - j) < tolerance for i, j in zip(param, ref) if j is not None)
+            return all(abs(idx - j) < tolerance for idx, j in zip(param, ref, strict=True) if j is not None)
 
         if crys_system == "cubic":
             a = abc[0]
@@ -557,10 +557,8 @@ def _write_all_magnetic_space_groups_to_file(filename):
         "http://stokes.byu.edu/iso/magnetic_data.txt\n"
         "Used with kind permission from Professor Branton Campbell, BYU\n\n"
     )
-    all_msgs = []
-    for i in range(1, 1652):
-        all_msgs.append(MagneticSpaceGroup(i))
+    all_msgs = list(map(MagneticSpaceGroup, range(1, 1652)))
     for msg in all_msgs:
         out += f"\n{msg.data_str()}\n\n--------\n"
-    with open(filename, mode="w") as file:
+    with open(filename, mode="w", encoding="utf-8") as file:
         file.write(out)

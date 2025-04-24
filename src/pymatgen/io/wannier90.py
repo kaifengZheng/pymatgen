@@ -30,7 +30,7 @@ class Unk:
         data (numpy.ndarray): Numpy array that contains the wavefunction data in the UNK file.
             The shape should be (nbnd, ngx, ngy, ngz) for regular calculations and (nbnd, 2, ngx, ngy, ngz)
             for noncollinear calculations.
-        is_noncollinear (bool): Boolean that specifies if data is from a noncollinear calculation.
+        is_noncollinear (bool): True if data is from a noncollinear calculation.
         nbnd (int): Number of bands in data.
         ng (tuple): Sequence of three integers that correspond to the grid size of the given data.
             The definition is ng = (ngx, ngy, ngz).
@@ -144,7 +144,12 @@ class Unk:
                     file.write_record(self.data[ib].flatten("F"))
 
     def __repr__(self) -> str:
-        ik, nbnd, ncl, ngx, ngy, ngz = self.ik, self.nbnd, self.is_noncollinear, *self.ng
+        ik, nbnd, ncl, ngx, ngy, ngz = (
+            self.ik,
+            self.nbnd,
+            self.is_noncollinear,
+            *self.ng,
+        )
         return f"{(type(self).__name__)}({ik=}, {nbnd=}, {ncl=}, {ngx=}, {ngy=}, {ngz=})"
 
     def __eq__(self, other: object) -> bool:

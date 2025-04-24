@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from unittest import TestCase
-
 import numpy as np
+from pytest import approx
+
 from pymatgen.analysis.magnetism.jahnteller import JahnTellerAnalyzer, Species
 from pymatgen.core import Structure
 from pymatgen.util.testing import TEST_FILES_DIR
-from pytest import approx
 
 
-class TestJahnTeller(TestCase):
-    def setUp(self):
+class TestJahnTeller:
+    def setup_method(self):
         self.jt = JahnTellerAnalyzer()
 
     def test_jahn_teller_species_analysis(self):
@@ -95,7 +94,14 @@ class TestJahnTeller(TestCase):
                 {
                     "ligand": "O2-",
                     "ligand_bond_length_spread": 0.2111,
-                    "ligand_bond_lengths": {2.2951, 2.2215, 2.2383, 2.1382, 2.084, 2.0863},
+                    "ligand_bond_lengths": {
+                        2.2951,
+                        2.2215,
+                        2.2383,
+                        2.1382,
+                        2.084,
+                        2.0863,
+                    },
                     "strength": "weak",
                     "motif": "oct",
                     "motif_order_parameter": 0.1441,

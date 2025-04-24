@@ -23,7 +23,6 @@ who outlined many of its possible uses:
 from __future__ import annotations
 
 import json
-import os
 import warnings
 from functools import lru_cache
 from itertools import groupby
@@ -33,17 +32,19 @@ import numpy as np
 import plotly.express as px
 from monty.json import MSONable
 from plotly.graph_objects import Figure, Mesh3d, Scatter, Scatter3d
+from scipy.spatial import ConvexHull, HalfspaceIntersection
+
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
+from pymatgen.core import PKG_DIR
 from pymatgen.core.composition import Composition, Element
 from pymatgen.util.coord import Simplex
 from pymatgen.util.due import Doi, due
 from pymatgen.util.string import htmlify
-from scipy.spatial import ConvexHull, HalfspaceIntersection
 
 if TYPE_CHECKING:
     from pymatgen.entries.computed_entries import ComputedEntry
 
-with open(f"{os.path.dirname(__file__)}/../util/plotly_chempot_layouts.json") as file:
+with open(f"{PKG_DIR}/util/plotly_chempot_layouts.json", encoding="utf-8") as file:
     plotly_layouts = json.load(file)
 
 
@@ -167,7 +168,7 @@ class ChemicalPotentialDiagram(MSONable):
                 (in eV/atom), helping provide visual clarity. Defaults to 1.0.
 
         Returns:
-            A Plotly Figure object
+            plotly.graph_objects.Figure
         """
         if elements:
             elems = [Element(str(e)) for e in elements]
@@ -177,7 +178,11 @@ class ChemicalPotentialDiagram(MSONable):
                 elems = elems[:3]  # default to first three elements
 
         if len(elems) == 2 and self.dim == 2:
-            fig = self._get_2d_plot(elements=elems, label_stable=label_stable, element_padding=element_padding)
+            fig = self._get_2d_plot(
+                elements=elems,
+                label_stable=label_stable,
+                element_padding=element_padding,
+            )
         elif len(elems) == 2 and self.dim > 2:
             entries = [e for e in self.entries if set(e.elements).issubset(elems)]
             cpd = ChemicalPotentialDiagram(
@@ -212,7 +217,7 @@ class ChemicalPotentialDiagram(MSONable):
 
         domains: dict[str, list] = {entry.reduced_formula: [] for entry in entries}
 
-        for intersection, facet in zip(hs_int.intersections, hs_int.dual_facets):
+        for intersection, facet in zip(hs_int.intersections, hs_int.dual_facets, strict=True):
             for v in facet:
                 if v < len(entries):
                     this_entry = entries[v]
@@ -251,12 +256,17 @@ class ChemicalPotentialDiagram(MSONable):
         inds.extend([self._min_entries.index(el) for el in self.el_refs.values()])
 
         hyperplanes = data[inds]
-        hyperplanes[:, -1] = hyperplanes[:, -1] * -1
+        hyperplanes[:, -1] *= -1
         hyperplane_entries = [self._min_entries[idx] for idx in inds]
 
         return hyperplanes, hyperplane_entries
 
-    def _get_2d_plot(self, elements: list[Element], label_stable: bool | None, element_padding: float | None) -> Figure:
+    def _get_2d_plot(
+        self,
+        elements: list[Element],
+        label_stable: bool | None,
+        element_padding: float | None,
+    ) -> Figure:
         """Get a Plotly figure for a 2-dimensional chemical potential diagram."""
         domains = self.domains.copy()
         elem_indices = [self.elements.index(e) for e in elements]
@@ -294,7 +304,7 @@ class ChemicalPotentialDiagram(MSONable):
             draw_domains[formula] = pts_2d
 
         layout = plotly_layouts["default_layout_2d"].copy()
-        layout.update(self._get_axis_layout_dict(elements))
+        layout |= self._get_axis_layout_dict(elements)
         if label_stable:
             layout["annotations"] = annotations
 
@@ -365,7 +375,7 @@ class ChemicalPotentialDiagram(MSONable):
             domain_simplexes[formula] = simplexes
 
         layout = plotly_layouts["default_layout_3d"].copy()
-        layout["scene"].update(self._get_axis_layout_dict(elements))
+        layout["scene"] |= self._get_axis_layout_dict(elements)
         layout["scene"]["annotations"] = None
 
         if label_stable:
@@ -381,7 +391,7 @@ class ChemicalPotentialDiagram(MSONable):
         if formulas_to_draw:
             for formula in formulas_to_draw:
                 if formula not in domain_simplexes:
-                    warnings.warn(f"Specified formula to draw, {formula}, not found!")
+                    warnings.warn(f"Specified formula to draw, {formula}, not found!", stacklevel=2)
 
         if draw_formula_lines:
             data.extend(self._get_3d_formula_lines(draw_domains, formula_colors))
@@ -558,7 +568,7 @@ class ChemicalPotentialDiagram(MSONable):
         """Get a Plotly annotation dict given a formula and location."""
         formula = htmlify(formula)
         annotation = plotly_layouts["default_annotation_layout"].copy()
-        annotation.update({"x": ann_loc[0], "y": ann_loc[1], "text": formula})
+        annotation |= {"x": ann_loc[0], "y": ann_loc[1], "text": formula}
         if len(ann_loc) == 3:
             annotation["z"] = ann_loc[2]
         return annotation
@@ -577,7 +587,7 @@ class ChemicalPotentialDiagram(MSONable):
             return f"<br> μ<sub>{element}</sub> - μ<sub>{element}</sub><sup>o</sup> (eV)"
 
         axes_layout = {}
-        for ax, el in zip(axes, elements):
+        for ax, el in zip(axes, elements, strict=True):
             layout = plotly_layouts[layout_name].copy()
             layout["title"] = get_chempot_axis_title(el)
             axes_layout[ax] = layout
@@ -669,11 +679,9 @@ def get_centroid_2d(vertices: np.ndarray) -> np.ndarray:
             circumferentially
 
     Returns:
-        np.array: Giving 2-d centroid coordinates.
+        np.ndarray: Giving 2-d centroid coordinates.
     """
-    cx = 0
-    cy = 0
-    a = 0
+    cx = cy = a = 0
 
     for idx in range(len(vertices) - 1):
         xi = vertices[idx, 0]

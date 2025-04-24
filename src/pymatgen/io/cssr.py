@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from monty.io import zopen
+
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 
@@ -31,7 +32,7 @@ class Cssr:
     def __init__(self, structure: Structure):
         """
         Args:
-            structure (Structure/IStructure): A structure to create the Cssr object.
+            structure (Structure | IStructure): A structure to create the Cssr object.
         """
         if not structure.is_ordered:
             raise ValueError("Cssr file can only be constructed from ordered structure")
@@ -56,7 +57,7 @@ class Cssr:
         Args:
             filename (str): Filename to write to.
         """
-        with zopen(filename, mode="wt") as file:
+        with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(str(self) + "\n")
 
     @classmethod
@@ -78,7 +79,10 @@ class Cssr:
         lattice = Lattice.from_parameters(*lengths, *angles)
         sp, coords = [], []
         for line in lines[4:]:
-            if match := re.match(r"\d+\s+(\w+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)", line.strip()):
+            if match := re.match(
+                r"\d+\s+(\w+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)",
+                line.strip(),
+            ):
                 sp.append(match[1])
                 coords.append([float(match[i]) for i in range(2, 5)])
         return cls(Structure(lattice, sp, coords))
@@ -94,5 +98,5 @@ class Cssr:
         Returns:
             Cssr object.
         """
-        with zopen(filename, mode="rt") as file:
+        with zopen(filename, mode="rt", encoding="utf-8") as file:
             return cls.from_str(file.read())

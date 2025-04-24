@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from monty.json import MSONable
 
 if TYPE_CHECKING:
+    from typing import Any, Literal
+
     from pymatgen.core import Structure
 
 __author__ = "Shyue Ping Ong"
@@ -22,7 +24,7 @@ class AbstractTransformation(MSONable, abc.ABC):
     """Abstract transformation class."""
 
     @abc.abstractmethod
-    def apply_transformation(self, structure: Structure):
+    def apply_transformation(self, structure: Structure) -> Structure | list[dict[str, Any]]:
         """Apply the transformation to a structure. Depending on whether a
         transformation is one-to-many, there may be an option to return a
         ranked list of structures.
@@ -46,7 +48,6 @@ class AbstractTransformation(MSONable, abc.ABC):
             be stored in the transformation_parameters dictionary in the
             transmuted structure class.
         """
-        return
 
     @property
     def inverse(self) -> AbstractTransformation | None:
@@ -56,7 +57,7 @@ class AbstractTransformation(MSONable, abc.ABC):
         """
 
     @property
-    def is_one_to_many(self) -> bool:
+    def is_one_to_many(self) -> Literal[False]:
         """Determine if a Transformation is a one-to-many transformation. In that case, the
         apply_transformation method should have a keyword arg "return_ranked_list" which
         allows for the transformed structures to be returned as a ranked list.
@@ -65,7 +66,7 @@ class AbstractTransformation(MSONable, abc.ABC):
         return False
 
     @property
-    def use_multiprocessing(self) -> bool:
+    def use_multiprocessing(self) -> Literal[False]:
         """Indicates whether the transformation can be applied by a
         subprocessing pool. This should be overridden to return True for
         transformations that the transmuter can parallelize.

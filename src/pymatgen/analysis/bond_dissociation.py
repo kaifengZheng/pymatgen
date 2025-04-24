@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import warnings
 from typing import cast
 
 import networkx as nx
 from monty.json import MSONable
+
 from pymatgen.analysis.fragmenter import open_ring
 from pymatgen.analysis.graphs import MoleculeGraph, MolGraphSplitError
 from pymatgen.analysis.local_env import OpenBabelNN
@@ -22,8 +22,6 @@ __email__ = "samblau1@gmail.com"
 __status__ = "Alpha"
 __date__ = "7/26/18"
 
-logger = logging.getLogger(__name__)
-
 
 class BondDissociationEnergies(MSONable):
     """
@@ -32,7 +30,7 @@ class BondDissociationEnergies(MSONable):
     fragments, or, in the case of a ring bond, from the energy of the molecule obtained from breaking
     the bond and opening the ring. This class should only be called after the energies of the optimized
     principle molecule and all relevant optimized fragments have been determined, either from quantum
-    chemistry or elsewhere. It was written to provide the analysis after running an Atomate fragmentation
+    chemistry or elsewhere. It was written to provide the analysis after running an `atomate` fragmentation
     workflow.
     """
 
@@ -73,7 +71,7 @@ class BondDissociationEnergies(MSONable):
                     raise RuntimeError(f"{key=} must be present in all fragment entries! Exiting...")
 
         # Define expected charges
-        final_mol = cast(dict, molecule_entry["final_molecule"])
+        final_mol = cast("dict", molecule_entry["final_molecule"])
         final_charge = int(final_mol["charge"])  # type: ignore[index]
         if not allow_additional_charge_separation:
             if final_charge == 0:
@@ -85,9 +83,19 @@ class BondDissociationEnergies(MSONable):
         elif final_charge == 0:
             self.expected_charges = [-2, -1, 0, 1, 2]
         elif final_charge < 0:
-            self.expected_charges = [final_charge - 1, final_charge, final_charge + 1, final_charge + 2]
+            self.expected_charges = [
+                final_charge - 1,
+                final_charge,
+                final_charge + 1,
+                final_charge + 2,
+            ]
         else:
-            self.expected_charges = [final_charge - 2, final_charge - 1, final_charge, final_charge + 1]
+            self.expected_charges = [
+                final_charge - 2,
+                final_charge - 1,
+                final_charge,
+                final_charge + 1,
+            ]
 
         # Build principle molecule graph
         self.mol_graph = MoleculeGraph.from_local_env_strategy(Molecule.from_dict(final_mol), OpenBabelNN())
@@ -99,7 +107,8 @@ class BondDissociationEnergies(MSONable):
         if multibreak:
             warnings.warn(
                 "Breaking pairs of ring bonds. WARNING: Structure changes much more likely, meaning dissociation values"
-                " are less reliable! This is a bad idea!"
+                " are less reliable! This is a bad idea!",
+                stacklevel=2,
             )
             self.bond_pairs = []
             for ii, bond in enumerate(self.ring_bonds, start=1):
@@ -156,7 +165,8 @@ class BondDissociationEnergies(MSONable):
                         warnings.warn(
                             f"Missing ring opening fragment resulting from the breakage of {specie[bonds[0][0]]} "
                             f"{specie[bonds[0][1]]} bond {bonds[0][0]} {bonds[0][1]} which would yield a "
-                            f"molecule with this SMILES string: {smiles}"
+                            f"molecule with this SMILES string: {smiles}",
+                            stacklevel=2,
                         )
                     elif len(good_entries) == 1:
                         # If we have only one good entry, format it and add it to the list that will eventually return
@@ -204,14 +214,14 @@ class BondDissociationEnergies(MSONable):
                     smiles = pb_mol.write("smi").split()[0]
                     for charge in self.expected_charges:
                         if charge not in frag1_charges_found:
-                            warnings.warn(f"Missing {charge=} for fragment {smiles}")
+                            warnings.warn(f"Missing {charge=} for fragment {smiles}", stacklevel=2)
                 if len(frag2_charges_found) < len(self.expected_charges):
                     bb = BabelMolAdaptor(fragments[1].molecule)
                     pb_mol = bb.pybel_mol
                     smiles = pb_mol.write("smi").split()[0]
                     for charge in self.expected_charges:
                         if charge not in frag2_charges_found:
-                            warnings.warn(f"Missing {charge=} for fragment {smiles}")
+                            warnings.warn(f"Missing {charge=} for fragment {smiles}", stacklevel=2)
                 # Now we attempt to pair fragments with the right total charge, starting with only fragments with no
                 # structural change:
                 for frag1 in frag1_entries[0]:  # 0 -> no structural change

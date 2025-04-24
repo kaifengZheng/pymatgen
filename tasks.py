@@ -9,17 +9,18 @@ To cut a new pymatgen release:
 
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import re
 import subprocess
 import webbrowser
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import requests
 from invoke import task
 from monty.os import cd
+
 from pymatgen.core import __version__
 
 if TYPE_CHECKING:
@@ -42,7 +43,7 @@ def make_doc(ctx: Context) -> None:
 
         # Note: we use HTML building for the API docs to preserve search functionality.
         ctx.run("sphinx-build -b html apidoc html")  # HTML building.
-        ctx.run("rm apidocs/*.rst", warn=True)
+        ctx.run("rm apidoc/*.rst", warn=True)
         ctx.run("mv html/pymatgen*.html .")
         ctx.run("mv html/modules.html .")
 
@@ -50,7 +51,7 @@ def make_doc(ctx: Context) -> None:
         # ctx.run("rm pymatgen*tests*.md", warn=True)
         # ctx.run("rm pymatgen*.html", warn=True)
         # for filename in glob("pymatgen*.md"):
-        #     with open(filename) as file:
+        #     with open(filename, encoding="utf-8") as file:
         #         lines = [line.rstrip() for line in file if "Submodules" not in line]
         #     if filename == "pymatgen.md":
         #         preamble = ["---", "layout: default", "title: API Documentation", "nav_order: 6", "---", ""]
@@ -66,7 +67,7 @@ def make_doc(ctx: Context) -> None:
         #             "{:toc}",
         #             "",
         #         ]
-        #     with open(filename, mode="w") as file:
+        #     with open(filename, mode="w", encoding="utf-8") as file:
         #         file.write("\n".join(preamble + lines))
         ctx.run("rm -r markdown", warn=True)
         ctx.run("rm -r html", warn=True)
@@ -96,10 +97,10 @@ def set_ver(ctx: Context, version: str):
         ctx (Context): The context.
         version (str): An input version.
     """
-    with open("pyproject.toml") as file:
+    with open("pyproject.toml", encoding="utf-8") as file:
         lines = [re.sub(r"^version = \"([^,]+)\"", f'version = "{version}"', line.rstrip()) for line in file]
 
-    with open("pyproject.toml", "w") as file:
+    with open("pyproject.toml", "w", encoding="utf-8") as file:
         file.write("\n".join(lines) + "\n")
 
     ctx.run("ruff check --fix src")
@@ -117,10 +118,10 @@ def release_github(ctx: Context, version: str) -> None:
     """
     with open("docs/CHANGES.md", encoding="utf-8") as file:
         contents = file.read()
-    tokens = re.split(r"\-+", contents)
+    tokens = re.split(r"\n\#\#\s", contents)
     desc = tokens[1].strip()
     tokens = desc.split("\n")
-    desc = "\n".join(tokens[:-1]).strip()
+    desc = "\n".join(tokens[1:]).strip()
     payload = {
         "tag_name": f"v{version}",
         "target_commitish": "master",
@@ -133,7 +134,7 @@ def release_github(ctx: Context, version: str) -> None:
         "https://api.github.com/repos/materialsproject/pymatgen/releases",
         data=json.dumps(payload),
         headers={"Authorization": f"token {os.environ['GITHUB_RELEASES_TOKEN']}"},
-        timeout=600,
+        timeout=60,
     )
     print(response.text)
 
@@ -149,33 +150,53 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
         dry_run (bool, optional): If True, the function will only print the changes without
             updating the actual change log file. Defaults to False.
     """
-    version = version or f"{datetime.datetime.now(tz=datetime.timezone.utc):%Y.%-m.%-d}"
+    version = version or f"{datetime.now(tz=timezone.utc):%Y.%-m.%-d}"
+    print(f"Getting all comments since {__version__}")
     output = subprocess.check_output(["git", "log", "--pretty=format:%s", f"v{__version__}..HEAD"])
     lines = []
     ignored_commits = []
     for line in output.decode("utf-8").strip().split("\n"):
-        re_match = re.match(r"Merge pull request \#(\d+) from (.*)", line)
+        re_match = re.match(r".*\(\#(\d+)\)", line)
         if re_match and "materialsproject/dependabot/pip" not in line:
-            pr_number = re_match[1]
-            contributor, pr_name = re_match[2].split("/", 1)
+            pr_number = re_match[1].strip()
             response = requests.get(
-                f"https://api.github.com/repos/materialsproject/pymatgen/pulls/{pr_number}", timeout=600
+                f"https://api.github.com/repos/materialsproject/pymatgen/pulls/{pr_number}",
+                timeout=60,
             )
-            lines += [f"* PR #{pr_number} from @{contributor} {pr_name}"]
-            json_resp = response.json()
-            if body := json_resp["body"]:
+            resp = response.json()
+            lines += [f"- PR #{pr_number} {resp['title'].strip()} by @{resp['user']['login']}"]
+            if body := resp["body"]:
                 for ll in map(str.strip, body.split("\n")):
                     if ll in ("", "## Summary"):
                         continue
                     if ll.startswith(("## Checklist", "## TODO")):
                         break
                     lines += [f"    {ll}"]
-        ignored_commits += [line]
+        else:
+            ignored_commits += [line]
+
+    body = "\n".join(lines)
+    try:
+        # Use OpenAI to improve changelog. Requires openai to be installed and an OPENAPI_KEY env variable.
+        from openai import OpenAI
+
+        client = OpenAI(api_key=os.environ["OPENAPI_KEY"])
+
+        messages = [{"role": "user", "content": f"summarize as a markdown numbered list, include authors: '{body}'"}]
+        chat = client.chat.completions.create(model="gpt-4o", messages=messages)
+
+        reply = chat.choices[0].message.content
+        body = "\n".join(reply.split("\n")[1:-1])
+        body = body.strip().strip("`")
+        print(f"ChatGPT Summary of Changes:\n{body}")
+
+    except BaseException as ex:
+        print(f"Unable to use openai due to {ex}")
     with open("docs/CHANGES.md", encoding="utf-8") as file:
         contents = file.read()
     delim = "##"
     tokens = contents.split(delim)
-    tokens.insert(1, f"## v{version}\n\n" + "\n".join(lines) + "\n")
+    tokens.insert(1, f"## v{version}\n\n{body}\n\n")
     if dry_run:
         print(tokens[0] + "##".join(tokens[1:]))
     else:
@@ -196,7 +217,7 @@ def release(ctx: Context, version: str | None = None, nodoc: bool = False) -> No
         version (str, optional): The version to release.
         nodoc (bool, optional): Whether to skip documentation generation.
     """
-    version = version or f"{datetime.datetime.now(tz=datetime.timezone.utc):%Y.%-m.%-d}"
+    version = version or f"{datetime.now(tz=timezone.utc):%Y.%-m.%-d}"
     ctx.run("rm -r dist build pymatgen.egg-info", warn=True)
     set_ver(ctx, version)
     if not nodoc:
@@ -206,11 +227,10 @@ def release(ctx: Context, version: str | None = None, nodoc: bool = False) -> No
         ctx.run("git push")
     release_github(ctx, version)
 
-    ctx.run("rm -f dist/*.*", warn=True)
-    ctx.run("python -m build", warn=True)
-    ctx.run("twine upload --skip-existing dist/*.whl", warn=True)
-    ctx.run("twine upload --skip-existing dist/*.tar.gz", warn=True)
-    # post_discourse(ctx, warn=True)
+    # ctx.run("rm -f dist/*.*", warn=True)
+    # ctx.run("pip install -e .", warn=True)
+    # ctx.run("uv build", warn=True)
+    # ctx.run("uv publish", warn=True)
 
 
 @task

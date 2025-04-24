@@ -9,12 +9,12 @@ For additional flexibility and automation, use the atomate2-lammps implementatio
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass, field
 from string import Template
 
 from monty.io import zopen
+
 from pymatgen.core import Structure
 from pymatgen.io.core import InputGenerator
 from pymatgen.io.lammps.data import CombinedData, LammpsData
@@ -25,9 +25,8 @@ __author__ = "Ryan Kingsbury, Guillaume Brunin (Matgenix)"
 __copyright__ = "Copyright 2021, The Materials Project"
 __version__ = "0.2"
 
-logger = logging.getLogger(__name__)
-module_dir = os.path.dirname(os.path.abspath(__file__))
-template_dir = f"{module_dir}/templates"
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_DIR = f"{MODULE_DIR}/templates"
 
 
 @dataclass
@@ -68,7 +67,7 @@ class BaseLammpsGenerator(InputGenerator):
         data: LammpsData = LammpsData.from_structure(structure) if isinstance(structure, Structure) else structure
 
         # Load the template
-        with zopen(self.template, mode="r") as file:
+        with zopen(self.template, mode="rt", encoding="utf-8") as file:
             template_str = file.read()
 
         # Replace all variables
@@ -77,7 +76,12 @@ class BaseLammpsGenerator(InputGenerator):
         input_file = LammpsInputFile.from_str(input_str, keep_stages=self.keep_stages)
 
         # Get the LammpsInputSet from the InputFile and data
-        return LammpsInputSet(inputfile=input_file, data=data, calc_type=self.calc_type, template_file=self.template)
+        return LammpsInputSet(
+            inputfile=input_file,
+            data=data,
+            calc_type=self.calc_type,
+            template_file=self.template,
+        )
 
 
 class LammpsMinimization(BaseLammpsGenerator):
@@ -127,7 +131,7 @@ class LammpsMinimization(BaseLammpsGenerator):
                 If False, stage names are not printed and all commands appear in a single block.
         """
         if template is None:
-            template = f"{template_dir}/minimization.template"
+            template = f"{TEMPLATE_DIR}/minimization.template"
         settings = {
             "units": units,
             "atom_style": atom_style,
@@ -137,7 +141,12 @@ class LammpsMinimization(BaseLammpsGenerator):
             "force_field": force_field,
         }
 
-        super().__init__(template=template, settings=settings, calc_type="minimization", keep_stages=keep_stages)
+        super().__init__(
+            template=template,
+            settings=settings,
+            calc_type="minimization",
+            keep_stages=keep_stages,
+        )
 
     @property
     def units(self) -> str:
