@@ -5,6 +5,7 @@ entries, such as grouping entries by structure.
 from __future__ import annotations
 
 import collections
+import collections.abc
 import csv
 import itertools
 import json
@@ -169,9 +170,7 @@ def group_entries_by_structure(
                 groups,
             )
         )
-    entry_groups = []
-    for g in groups:
-        entry_groups.append(json.loads(g, cls=MontyDecoder))
+    entry_groups = [json.loads(g, cls=MontyDecoder) for g in groups]
     logger.info(f"Finished at {datetime.now(tz=timezone.utc)}")
     logger.info(f"Took {datetime.now(tz=timezone.utc) - start}")
     return entry_groups

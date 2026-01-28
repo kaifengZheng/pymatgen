@@ -22,7 +22,7 @@ from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.util.coord import in_coord_list_pbc
 
 if TYPE_CHECKING:
-    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
     from numpy.typing import ArrayLike
     from typing_extensions import Self
 
@@ -454,20 +454,17 @@ class AdsorbateSiteFinder:
             xrep = np.ceil(min_lw / np.linalg.norm(self.slab.lattice.matrix[0]))
             yrep = np.ceil(min_lw / np.linalg.norm(self.slab.lattice.matrix[1]))
             repeat = [xrep, yrep, 1]
-        structs = []
 
-        find_args = find_args or {}
-        for coords in self.find_adsorption_sites(**find_args)["all"]:
-            structs.append(
-                self.add_adsorbate(
-                    molecule,
-                    coords,
-                    repeat=repeat,
-                    translate=translate,
-                    reorient=reorient,
-                )
+        return [
+            self.add_adsorbate(
+                molecule,
+                coords,
+                repeat=repeat,
+                translate=translate,
+                reorient=reorient,
             )
-        return structs
+            for coords in self.find_adsorption_sites(**(find_args or {}))["all"]
+        ]
 
     def adsorb_both_surfaces(
         self,
@@ -639,7 +636,7 @@ color_dict = {el: [j / 256.001 for j in colors["Jmol"][el]] for el in colors["Jm
 
 def plot_slab(
     slab: Slab,
-    ax: plt.Axes,
+    ax: Axes,
     scale=0.8,
     repeat=5,
     window=1.5,
