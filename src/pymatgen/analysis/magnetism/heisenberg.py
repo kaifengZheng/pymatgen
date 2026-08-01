@@ -23,7 +23,7 @@ from pymatgen.core.structure import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing import Self
 
 __author__ = "ncfrey"
 __version__ = "0.1"
@@ -520,7 +520,10 @@ class HeisenbergMapper:
                 omega[j, i] += ex_params[k]
 
             omega = omega * 2 / 3 / k_boltzmann
-            eigen_vals, _eigen_vecs = np.linalg.eig(omega)
+            # omega is symmetric by construction, so use eigvalsh to guarantee
+            # real eigenvalues (np.linalg.eig can return complex128 with zero
+            # imaginary part depending on the LAPACK build).
+            eigen_vals = np.linalg.eigvalsh(omega)
             mft_t = max(eigen_vals)
 
         if mft_t > 1500:  # Not sensible!
@@ -913,12 +916,17 @@ class HeisenbergModel(MSONable):
         # Interaction graph
         igraph = StructureGraph.from_dict(dct["igraph"])
 
-        # Reconstitute the exchange matrix DataFrame
-        try:
-            ex_mat = literal_eval(dct["ex_mat"])
-            ex_mat = pd.DataFrame.from_dict(ex_mat)
-        except SyntaxError:  # if ex_mat is empty
-            ex_mat = pd.DataFrame(columns=["E", "E0"])
+        # Reconstitute the exchange matrix DataFrame. as_dict() serializes
+        # ex_mat with jsanitize, which turns a DataFrame into a dict, while
+        # older serializations may store a (JSON/repr) string instead. Accept
+        # both forms and fall back to an empty matrix when ex_mat is empty.
+        ex_mat = dct["ex_mat"]
+        if isinstance(ex_mat, str):
+            try:
+                ex_mat = literal_eval(ex_mat)
+            except (SyntaxError, ValueError):  # empty or unparsable string
+                ex_mat = None
+        ex_mat = pd.DataFrame.from_dict(ex_mat) if ex_mat else pd.DataFrame(columns=["E", "E0"])
 
         return HeisenbergModel(
             formula=dct["formula"],

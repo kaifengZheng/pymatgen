@@ -6,6 +6,150 @@ nav_order: 4
 
 # Changelog
 
+Releases tagged `(pymatgen-core)` originate from the
+[pymatgen-core](https://github.com/materialsproject/pymatgen-core) repo (PR numbers refer
+to that repo) and are pulled in automatically.
+
+## v2026.7.16
+
+**Diffraction performance.** The XRD/neutron pattern generators are now fully vectorized and element-grouped.
+- PR #4684 `XRDCalculator.get_pattern`: compute atomic form factors once per unique element instead of once per atom, replacing the `(M, N_atoms, n_coeff)` broadcast with per-element `(M, n_coeff)` work and occupancy-weighted phase sums; cuts both runtime and peak memory on large structures. (by @mkphuthi)
+- PR #4678 Vectorize the neutron `get_pattern` path and expand its test coverage. (by @Bud-Macaulay)
+- PR #4661 Vectorize `get_pattern` in the xrd module; fix a hang at high tolerance. (by @Bud-Macaulay)
+
+**Features**
+- PR #4655 Genericise `AflowPrototypeMatcher` so it is no longer tied to AFLOW-specific prototype data. (by @CompRhys)
+
+**Fixes**
+- PR #4682 `MagneticStructureEnumerator._generate_ordered_structures`: honor the configured `truncate_by_symmetry` count instead of the hardcoded `[:5]` slice. (by @steps-re)
+- PR #4666 Fix `HeisenbergModel` MSON round-trip: `from_dict` now accepts the `jsanitize`d dict form of `ex_mat` (previously `literal_eval` raised `ValueError`), tolerates the legacy string form, and falls back to an empty matrix. (by @vasa-develop)
+- PR #4658 Strip H/O from the `PourbaixDiagram` composition dict. (by @SAY-5)
+- PR #4672 Fix typo and docstring in `polarization.py`. (by @mminotaki)
+
+## v2026.5.19 (pymatgen-core)
+
+**Volumetric I/O.** `VolumetricData.parse_file` for CHGCAR/LOCPOT/ELFCAR is now backed by a Cython fast-float parser (vendored single-header `fast_float` C port). Roughly 6× faster than the prior `_plain_loadtxt` path on real fixtures and ~11× with parallel scaling experiments on multi-GB inputs (sequential path is what ships).
+- PR #59 `pymatgen.optimization.fast_parser.parse_n_doubles`: new Cython parser for ASCII double streams from binary file objects; `VolumetricData.parse_file` migrated off `np.loadtxt`. Bit-identical output verified against the prior path. (by @hheei, with review follow-ups)
+- PR #55 Remove POTCAR cryptographic hash validation (`PotcarSingle.verify_potcar`, `identify_potcar_hash_based`, the MD5/SHA256 file-hash lookup tables). The hash database is unmaintained and `UnknownPotcarWarning` was firing on perfectly valid newer POTCARs; the summary-stats validator (`PotcarSingle.is_valid`) remains the supported path. (by @shyuep)
+- PR #61 Replace deprecated `numpy.gcd`/`numpy.lcm` reductions with `math.gcd`/`math.lcm`; minor cleanup of redundant array dtype casts. (by @kavanase)
+- Route remaining hard-coded physical-constant literals (Bohr radius, Rydberg-eV, h·c, Abinit unit factors) through `pymatgen.core.constants` so future CODATA revisions update everywhere at once. `Vasprun` optical absorption now uses the CODATA-exact h·c/e value.
+
+**Fixes**
+- (#44) Correct RMSD formula in `molecule_matcher`: Kabsch/BruteForce/Hungarian/Genetic matchers now sum over the coordinate axis before averaging, matching the standard charnley/rmsd convention. Argmin selection is unchanged but reported RMSDs and user thresholds shift by √3. (by @shyuep)
+- Strip the `np.float64` type wrapper from `Lattice.__repr__` so lattice vectors render as plain floats under numpy 2.x.
+
+**Docs / CI / Tests**
+- (#30) Correct cod-tools attribution in `symm_ops.yaml` (the YAML mirrors COD::Spacegroups::Lookup::COD; header now points at cod-developers/cod-tools rather than the AiiDA wrapper). (by @shyuep)
+- Codecov: upload from the shard with `extras: optional` so reported coverage reflects ASE/seekpath/phonopy/hiphive-gated code; switch the upload action to OIDC (tokenless) auth after the shared `CODECOV_TOKEN` lost its repo binding.
+- Speed up the slowest test setups (lift heavy `setup_method` work to `setup_class`; vectorise the BSDOS projection generator) and add a conftest fixture that closes matplotlib figures between tests.
+- Expand coverage for `phonon.ir_spectra` (47%→75%) and `core.bond_valence` (57%→97%).
+- Skip the `extras: optional` test job on Windows (CI runtime, not a correctness change). PR #60 dependabot bump of faraday in `/docs`.
+
+## v2026.5.17 (pymatgen-core)
+
+**Cold-import latency.** Combined import-path work brings `from pymatgen.core import Structure` from ~244 ms to ~98 ms (−60%) on the reference benchmark machine.
+- PR #56 `Outcar.__init__`: cache OUTCAR text once and route every `read_pattern` / `read_table_pattern` call through the in-memory cache (~1.5–1.8× faster Outcar parsing on real files); vectorize `Vasprun.force_constants` reshape; `@functools.cache` on `_load_yaml_config` in `pymatgen.io.vasp.sets` (by @shyuep)
+- PR #58 New `pymatgen.core.constants` module with embedded CODATA literals; 13 consumer modules migrated off `scipy.constants` (by @shyuep)
+- PR #49 `Composition` / `Element`: cache idempotent properties via `@cached_property` / `@cache` (by @shyuep)
+- PR #48 `VolumetricData`: optimize block parsing of CHGCAR-like files (by @hheei)
+- PR #27 Lazy-load POTCAR summary stats in `pymatgen.io.vasp.inputs` (by @lan496)
+- Refactor: 3D-specialize neighbor-finding kernels in `pymatgen/optimization/neighbors.pyx`
+- PR #47 Fix `vec_to_surface` (by @susumu-fujii)
+- PR #42 Fix Vaspwave structure parsing for LOCPOT-only files (by @hheei)
+- PR #38 Fix `chargemol_caller` for VASP 6.5.1 (by @ThomasWarford)
+- PR #36 `border_hyperplanes`: use float values (by @kavanase)
+- PR #28 Updated RPA calculation parsing when `ALGO=CHI` (by @wuz75)
+- PR #19 `DftSet`: avoid `PendingDeprecationWarning` from YAML `unsafe` loader type (by @cogsworth37)
+- PR #18 `PeriodicSite` attribute setting routes through properties so changes persist through serialization (by @cogsworth37)
+- PR #17 Fix `AttributeError` in `VaspInput.as_dict()`; add `potcar_spec` handling test (by @cogsworth37)
+- PR #13 Fix reference to `cder_imag` in `pymatgen.io.vasp.outputs` (by @hisvvhtek)
+- PR #21 Add `_filter_kwargs` to `IStructure` for better kwargs handling (by @cogsworth37)
+- PR #53 Docstring and numerical accuracy fixes for `elasticity.elastic` (by @Elias-P-M)
+- Require `phonopy>=4.0.0`; restore v3 `primitive_matrix` semantics by passing `"P"` at every `Phonopy(...)` call site in `pymatgen.io.phonopy`
+
+**Features**
+- PR #35 Add `Vaspwave` support for `vaspwave.h5` outputs (by @hheei)
+- PR #34 `Outcar.read_vacuum_potentials` (by @ThomasWarford)
+- PR #39 `IStructure.get_primitive_structure`: refactor inner distance calculations to use `scipy.spatial.cKDTree`; validate tolerance (by @kavanase)
+- PR #32 `Structure.relax`: accept `asecellfilter_kwargs` for more controlled cell relaxation (by @deepanshuaggarwal51)
+- PR #29 `BztPlotter.plot_bands` / `plot_dos`: expose additional control arguments (by @deepanshuaggarwal51)
+- PR #43 Cover `HighSymmKpath` and `util.plotting` helpers; fix latent bugs (by @shyuep)
+- PR #41 Restore dropped `structure_analyzer` and `CohpPlotter` tests (by @shyuep)
+
+## v2026.5.4
+
+- PR #4614 Prevent same-composition entries from reappearing in inner hull reduction (by @irishmango)
+- PR #4615 Clear `energy_adjustments` correctly in clean mode to avoid skipped removals (by @irishmango)
+- PR #4649 Deprecate LobsterEnv constructors that mixed file paths and objects; prefer object-only initialization (by @naik-aakash)
+- PR #4625 Add partial update method to projected phase diagrams (by @CompRhys)
+- PR #4648 Speed up `pmg` CLI startup with lazy imports (by @hheei)
+- PR #4619 Add Elasticipy to addons documentation (by @DorianDepriester)
+- PR #4612 Fix incorrect method reference in `get_phase_separation_energy` docstring (by @irishmango)
+
+## v2026.4.16 (pymatgen-core)
+
+- PR #10 Updates to LAMMPS input set generators for compatibility with new atomate2 workflows (by @vir-k01)
+- PR #16 `Vasprun` XML parsing (`io.vasp.outputs`): use explicit lxml tags to reduce overhead (by @wladerer)
+- PR #22 `BztPlotter.plot_props`: validate band-property keys early to avoid `AttributeError` on unsupported properties (by @deepanshuaggarwal51)
+- Dependabot: bump orjson (PR #6), requests (PR #9), and pillow (PR #23)
+- PR #24 Fix incorrect oriented unit cell from `SlabGenerator.get_slab` when using constrained OUC primitive matching (by @ThomasWarford)
+- PR #25 Lazy-import `matplotlib.pyplot` in `structure_analyzer` (by @lan496)
+- PR #26 Fix deserialization of legacy phase diagram serialized data (by @esoteric-ephemera)
+- VASP input sets: pass `kpath_kwargs` into `HighSymmKpath` when building k-points from line-density configurations
+- Linting, typing, and mypy cleanups
+
+## v2026.4.7 (pymatgen-core)
+
+- Phase diagram, reaction calculator, and chempot diagram modules are added to pymatgen-core (`analysis.phase_diagram`, `analysis.reaction_calculator`, `analysis.chempot_diagram`), with tests and fixture data.
+- `pymatgen.core.entries`: add `group_entries_by_structure` and related multiprocessing helpers for grouping `ComputedStructureEntry` objects by structural similarity (supports phase diagram workflows).
+- PR #15 VaspInputSet: display a warning when changing `ISMEAR` (by @yantar92)
+
+## v2026.3.23
+
+- PR #4595 Major reorganization of pymatgen repo. Now core functionality is in a separate pymatgen-core repo and released as a separate pypi package. All changes should be backwards compatible, i.e., pip install pymatgen still provides all the same functionality as before. (by @shyuep)
+- PR #4592 Rewrite LOBSTER parsers with memory-efficient streaming architecture (by @tomdemeyere)
+- PR #4589 Pass `process_entries` arguments to `solid_compat` in `MaterialsProjectAqueousCompatibility` (by @lkkmpn)
+- PR #4584 Fix unstable sorting in phase diagram (by @DanielYang59)
+- PR #4581 Add yaml for smoothPES correction (by @CompRhys)
+- PR #4579 Allow for alchemical pseudoatoms in Abinit (by @GkAntonius)
+- PR #4567 Symmetry no longer necessary to have first in geometry directive for NwChem (by @francescalb)
+- PR #4565 Remove jupyter from dev dependency group (by @DanielYang59)
+- PR #4555 Update MatPESStaticSet docstring: PBE_54 to PBE_64 (by @ThomasWarford)
+- PR #4546 Speed/stability improvements to chemenv/coordination_environments (by @lutfia95)
+- PR #4545 Chargemol fixes for VASP POTCAR 64 (by @esoteric-ephemera)
+- PR #4542 Fix types for entry processing in phase diagram and compatibility (by @janosh)
+- PR #4541 PatchedPhaseDiagram mimic PhaseDiagram Serialization (by @CompRhys)
+- PR #4535 Minor fixes to typing for `io.vasp.outputs.Wavecar` and `io.wannier90.Unk` (by @mturiansky)
+- PR #4531 Deprecate `CifParser` init support of `filename` as `StringIO` (by @DanielYang59)
+- PR #4530 Fix icet kwargs (by @esoteric-ephemera)
+- PR #4527 Replace assert with proper exceptions (by @DanielYang59)
+- PR #4526 `VolumetricData.copy` preserve subclass type (by @DanielYang59)
+- PR #4525 Minor type cleanup of `io.common` (by @DanielYang59)
+- PR #4522 `Incar.proc_val` reuse `incar_parameters.json` to determine types (by @DanielYang59)
+- PR #4521 Add ISEARCH parameter to incar_parameters.json (by @kavanase)
+- PR #4520 Avoid dict mutation in VaspInputSet.structure setter (by @janosh)
+- PR #4518 Enhance INCAR parsing: handle multi-line string and line continuation with backslash, fix handling of `!` as comment marker (by @DanielYang59)
+- PR #4516 Python 3.14 support (by @DanielYang59)
+- PR #4515 Update periodic table data: common oxidation states, critical temperature and electrical resistivity (by @DanielYang59)
+- PR #4514 Fix `Ion.as_reduced_dict` doesn't reduce charge (by @DanielYang59)
+- PR #4511 Fix PD Plotter to only show lowest energy for unstable composition (by @DanielYang59)
+- PR #4507 Add references/source to periodic table data (by @DanielYang59)
+- PR #4498 Allow for setting termination_ftol for film and substrate slabs separately (by @jinlhr542)
+- PR #4482 Simplify and clean up LobsterNeighbors (by @naik-aakash)
+- PR #4481 Fix icohpcollection & add missing keyword in Lobsterin (by @naik-aakash)
+- PR #4414 Phase Diagram Serialization Improvement (by @felix-adams)
+- PR #4148 Fix consideration of translation symmetry for some (extremely rare) edge cases in LobsterEnv (by @JaGeo)
+
+## v2026.3.9 (pymatgen-core)
+
+- PR #5 Add lobster io and electronic_structure/cohp.py module with history (by @naik-aakash)
+- PR #4 Add support for jdftx YAML files in pyproject.toml (by @cote3804)
+
+## v2026.2.24 (pymatgen-core)
+
+- First version of pymatgen-core, which includes all basic functionality of pymatgen.
+- Some refactoring of certain modules, e.g., `structure_matcher`, `molecule_matcher`, `elasticity`, etc. into `pymatgen/core`.
+
 ## v2025.10.7
 
 - PR #4503 Replace print statements with logging across library code and tests (by @DanielYang59)
@@ -75,6 +219,7 @@ nav_order: 4
     - Fix uncertainty as int for `EnergyAdjustment` cannot generate repr:
     ```python
     from pymatgen.entries.computed_entries import EnergyAdjustment
+
     print(EnergyAdjustment(10, uncertainty=0))
     ```
     Gives:
@@ -393,6 +538,7 @@ nav_order: 4
     Current the data for Electrical resistivity of Se is "high" (with `10<sup>-8</sup> &Omega; m` as the unit), and our parser would interpret it to:
     ```python
     from pymatgen.core import Element
+
     print(Element.Se.electrical_resistivity)  # 1e-08 m ohm
     ```
     This is the only data as "high" in `periodic_table.json` AFAIK.

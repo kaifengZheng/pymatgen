@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import numpy as np
 import pytest
@@ -10,7 +11,8 @@ from pytest import approx
 
 from pymatgen.analysis.xas.spectrum import XAS, site_weighted_spectrum
 from pymatgen.core import Element
-from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
+from pymatgen.util.testing import MatSciTest
+from tests.testing import TEST_FILES_DIR
 
 TEST_DIR = f"{TEST_FILES_DIR}/analysis/spectrum_test"
 
@@ -88,7 +90,7 @@ class TestXAS(MatSciTest):
             self.k_xanes.absorbing_element,
             zero_negative_intensity=True,
         )
-        assert all(v == 0.0 for i, v in enumerate(spectrum.y) if i % 2 == 1)
+        assert all(math.isclose(v, 0.0) for i, v in enumerate(spectrum.y) if i % 2 == 1)
 
     def test_stitch_xafs(self):
         with pytest.raises(ValueError, match="Invalid mode. Only XAFS and L23 are supported"):

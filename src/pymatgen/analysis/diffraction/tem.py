@@ -354,7 +354,7 @@ class TEMCalculator(AbstractDiffractionPatternCalculator):
             bool: True if the planes are parallel, False otherwise.
         """
         phi = self.get_interplanar_angle(structure, plane, other_plane)
-        return phi in (180, 0) or np.isnan(phi)
+        return bool(np.isclose(phi, 0, rtol=0, atol=1e-5) or np.isclose(phi, 180, rtol=0, atol=1e-5) or np.isnan(phi))
 
     def get_first_point(self, structure: Structure, points: list) -> dict[tuple[int, int, int], float]:
         """Get the first point to be plotted in the 2D DP, corresponding to maximum d/minimum R.
@@ -408,7 +408,7 @@ class TEMCalculator(AbstractDiffractionPatternCalculator):
             + p1[2] ** 2 * c_star**2
             + 2 * p1[0] * p1[1] * a_star * b_star * cos_gamma_star
             + 2 * p1[0] * p1[2] * a_star * c_star * cos_beta_star
-            + 2 * p1[1] * p1[2] * b_star * c_star * cos_gamma_star
+            + 2 * p1[1] * p1[2] * b_star * c_star * cos_alpha_star
         )
         r2_norm = np.sqrt(
             p2[0] ** 2 * a_star**2
@@ -416,14 +416,14 @@ class TEMCalculator(AbstractDiffractionPatternCalculator):
             + p2[2] ** 2 * c_star**2
             + 2 * p2[0] * p2[1] * a_star * b_star * cos_gamma_star
             + 2 * p2[0] * p2[2] * a_star * c_star * cos_beta_star
-            + 2 * p2[1] * p2[2] * b_star * c_star * cos_gamma_star
+            + 2 * p2[1] * p2[2] * b_star * c_star * cos_alpha_star
         )
         r1_dot_r2 = (
             p1[0] * p2[0] * a_star**2
             + p1[1] * p2[1] * b_star**2
             + p1[2] * p2[2] * c_star**2
             + (p1[0] * p2[1] + p2[0] * p1[1]) * a_star * b_star * cos_gamma_star
-            + (p1[0] * p2[2] + p2[0] * p1[1]) * a_star * c_star * cos_beta_star
+            + (p1[0] * p2[2] + p2[0] * p1[2]) * a_star * c_star * cos_beta_star
             + (p1[1] * p2[2] + p2[1] * p1[2]) * b_star * c_star * cos_alpha_star
         )
         phi = np.arccos(r1_dot_r2 / (r1_norm * r2_norm))

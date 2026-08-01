@@ -100,6 +100,12 @@ class XRDCalculator(AbstractDiffractionPatternCalculator):
     # Tuple of available radiation keywords.
     AVAILABLE_RADIATION = tuple(WAVELENGTHS)
 
+    # Upper bound on the number of entries of the per-element phase matrix
+    # exp(2 pi i g.r) held in memory at once when accumulating structure
+    # factors (2^22 complex128 entries = 64 MB). Bounds peak memory for
+    # large structures and wide two-theta ranges; has no effect on results.
+    PHASE_CHUNK_ENTRIES = 4_194_304
+
     def __init__(self, wavelength="CuKa", symprec: float = 0, debye_waller_factors=None):
         """Initialize the XRD calculator with a given radiation.
 
@@ -153,128 +159,143 @@ class XRDCalculator(AbstractDiffractionPatternCalculator):
         lattice = structure.lattice
         is_hex = lattice.is_hexagonal()
 
-        # Obtained from Bragg condition. Note that reciprocal lattice
-        # vector length is 1 / d_hkl.
         min_r, max_r = (
             (0, 2 / wavelength)
             if two_theta_range is None
             else [2 * math.sin(math.radians(t / 2)) / wavelength for t in two_theta_range]
         )
 
-        # Obtain crystallographic reciprocal lattice points within range
         recip_lattice = lattice.reciprocal_lattice_crystallographic
         recip_pts = recip_lattice.get_points_in_sphere([[0, 0, 0]], [0, 0, 0], max_r)
         if min_r:
             recip_pts = [pt for pt in recip_pts if pt[1] >= min_r]
 
-        # Create a flattened array of zs, coeffs, frac_coords and occus. This is used to perform
-        # vectorized computation of atomic scattering factors later. Note that these are not
-        # necessarily the same size as the structure as each partially occupied specie occupies its
-        # own position in the flattened array.
-        _zs = []
-        _coeffs = []
-        _frac_coords = []
-        _occus = []
-        _dw_factors = []
-
+        # --- Group sites by element ---
+        # The scattering coefficients, atomic number and Debye-Waller factor
+        # depend only on the element, so the form factor is computed once per
+        # element over all hkl instead of once per atom.
+        species_groups: dict[str, dict] = {}
         for site in structure:
             for sp, occu in site.species.items():
-                _zs.append(sp.Z)
                 try:
-                    c = ATOMIC_SCATTERING_PARAMS[sp.symbol]
+                    coeff = ATOMIC_SCATTERING_PARAMS[sp.symbol]
                 except KeyError:
                     raise ValueError(
                         f"Unable to calculate XRD pattern as there is no scattering coefficients for {sp.symbol}."
                     )
-                _coeffs.append(c)
-                _dw_factors.append(self.debye_waller_factors.get(sp.symbol, 0))
-                _frac_coords.append(site.frac_coords)
-                _occus.append(occu)
-
-        zs = np.array(_zs)
-        coeffs = np.array(_coeffs)
-        frac_coords = np.array(_frac_coords)
-        occus = np.array(_occus)
-        dw_factors = np.array(_dw_factors)
-        peaks: dict[float, list[float | list[tuple[int, ...]]]] = {}
-        two_thetas: list[float] = []
-
-        for hkl, g_hkl, ind, _ in sorted(recip_pts, key=lambda i: (i[1], -i[0][0], -i[0][1], -i[0][2])):
-            # Force miller indices to be integers
-            hkl = [round(i) for i in hkl]
-            if g_hkl != 0:
-                # Bragg condition
-                theta = math.asin(wavelength * g_hkl / 2)
-
-                # s = sin(theta) / wavelength = 1 / 2d = |ghkl| / 2 (d =
-                # 1/|ghkl|)
-                s = g_hkl / 2
-
-                # Store s^2 since we are using it a few times
-                s2 = s**2
-
-                # Vectorized computation of g.r for all fractional coords and
-                # hkl
-                g_dot_r = np.dot(frac_coords, np.transpose([hkl])).T[0]
-
-                # Highly vectorized computation of atomic scattering factors.
-                # Equivalent non-vectorized code is:
-                #
-                #   for site in structure:
-                #      el = site.specie
-                #      coeff = ATOMIC_SCATTERING_PARAMS[el.symbol]
-                #      fs = el.Z - 41.78214 * s2 * sum(
-                #          [d[0] * exp(-d[1] * s2) for d in coeff])
-                fs = zs - 41.78214 * s2 * np.sum(
-                    coeffs[:, :, 0] * np.exp(-coeffs[:, :, 1] * s2),
-                    axis=1,
+                grp = species_groups.setdefault(
+                    sp.symbol,
+                    {
+                        "z": sp.Z,
+                        "coeff": np.asarray(coeff),  # (n_coeff, 2)
+                        "dw_factor": self.debye_waller_factors.get(sp.symbol, 0),
+                        "frac_coords": [],
+                        "occus": [],
+                    },
                 )
+                grp["frac_coords"].append(site.frac_coords)
+                grp["occus"].append(occu)
 
-                dw_correction = np.exp(-dw_factors * s2)
+        # --- Unpack reciprocal points, keep one Friedel half-space ---
+        # The atomic scattering factors are real (anomalous dispersion is
+        # not modeled), so Friedel's law I(g) = I(-g) holds exactly:
+        # F(-g) = F*(g). Only the half-space with (h, k, l) lexicographically
+        # positive is computed; intensities are doubled and the -g Miller
+        # indices are restored when collecting hkl families. This also
+        # excludes the (000) point and halves the sort.
+        hkls_int = np.round([pt[0] for pt in recip_pts]).astype(int)  # (M, 3)
+        g_hkls = np.array([pt[1] for pt in recip_pts])  # (M,)
 
-                # Structure factor = sum of atomic scattering factors (with
-                # position factor exp(2j * pi * g.r and occupancies).
-                # Vectorized computation.
-                f_hkl = np.sum(fs * occus * np.exp(2j * np.pi * g_dot_r) * dw_correction)
+        h, k, ell = hkls_int.T
+        half = (h > 0) | ((h == 0) & (k > 0)) | ((h == 0) & (k == 0) & (ell > 0))
+        hkls_int = hkls_int[half]  # (M/2, 3)
+        g_hkls = g_hkls[half]
 
-                # Lorentz polarization correction for hkl
-                lorentz_factor = (1 + math.cos(2 * theta) ** 2) / (math.sin(theta) ** 2 * math.cos(theta))
+        # Same ordering as the previous sorted(key=(g, -h, -k, -l)):
+        # np.lexsort is stable and takes keys in reverse priority order.
+        order = np.lexsort((-hkls_int[:, 2], -hkls_int[:, 1], -hkls_int[:, 0], g_hkls))
+        hkls_int = hkls_int[order]
+        g_hkls = g_hkls[order]
 
-                # Intensity for hkl is modulus square of structure factor
-                i_hkl = (f_hkl * f_hkl.conjugate()).real
+        # --- Fully vectorized computation over all M hkl points ---
+        # shapes: (M,)
+        theta = np.arcsin(np.clip(wavelength * g_hkls / 2, -1, 1))
+        s2 = (g_hkls / 2) ** 2  # (M,)
 
-                two_theta = math.degrees(2 * theta)
+        hkls_float = hkls_int.astype(float)  # (M, 3)
 
-                if is_hex:
-                    # Use Miller-Bravais indices for hexagonal lattices
-                    hkl = (hkl[0], hkl[1], -hkl[0] - hkl[1], hkl[2])
-                # Deal with floating point precision issues
-                ind = np.where(
-                    np.abs(np.subtract(two_thetas, two_theta)) < AbstractDiffractionPatternCalculator.TWO_THETA_TOL
-                )
-                if len(ind[0]) > 0:
-                    peaks[two_thetas[ind[0][0]]][0] += i_hkl * lorentz_factor
-                    peaks[two_thetas[ind[0][0]]][1].append(tuple(hkl))  # type: ignore[union-attr]
-                else:
-                    d_hkl = 1 / g_hkl
-                    peaks[two_theta] = [i_hkl * lorentz_factor, [tuple(hkl)], d_hkl]
-                    two_thetas.append(two_theta)
+        # Structure factors accumulated element by element: (M,)
+        #   F(g) = sum_e f_e(g) DW_e(g) sum_{j in e} occu_j exp(2 pi i g.r_j)
+        f_hkl = np.zeros(len(g_hkls), dtype=np.complex128)
+        for grp in species_groups.values():
+            coeff = grp["coeff"]  # (n_coeff, 2)
+            # Atomic scattering factor for this element: (M,)
+            #   f(s) = Z - 41.78214 * s^2 * sum_k(a_k * exp(-b_k * s^2))
+            fs = grp["z"] - 41.78214 * s2 * np.sum(coeff[:, 0] * np.exp(-coeff[:, 1] * s2[:, None]), axis=1)
+            if grp["dw_factor"]:
+                fs = fs * np.exp(-grp["dw_factor"] * s2)
 
-        # Scale intensities so that the max intensity is 100
+            # Occupancy-weighted phase sum over this element's sites,
+            # accumulated in chunks of hkl rows so the (chunk, m) phase
+            # matrix never exceeds PHASE_CHUNK_ENTRIES entries.
+            fcoords_t = np.asarray(grp["frac_coords"]).T  # (3, m)
+            occus = np.asarray(grp["occus"])  # (m,)
+            n_sites = fcoords_t.shape[1]
+            chunk_rows = max(1, self.PHASE_CHUNK_ENTRIES // n_sites)
+            for start in range(0, len(g_hkls), chunk_rows):
+                rows = slice(start, start + chunk_rows)
+                g_dot_r = hkls_float[rows] @ fcoords_t  # (chunk, m)
+                f_hkl[rows] += fs[rows] * (np.exp(2j * math.pi * g_dot_r) @ occus)
+
+        i_hkl = (f_hkl * f_hkl.conjugate()).real  # (M,)
+
+        # Lorentz-polarization factor: (M,)
+        cos2t = np.cos(2 * theta)
+        sint = np.sin(theta)
+        cost = np.cos(theta)
+        lorentz = (1 + cos2t**2) / (sint**2 * cost)
+
+        # Factor 2: the -g half-space contributes identically (Friedel).
+        intensities = 2 * i_hkl * lorentz  # (M,)
+        two_thetas_arr = np.degrees(2 * theta)  # (M,)
+
+        # Merge peaks within TWO_THETA_TOL by binning: round each two_theta to the
+        # nearest multiple of TWO_THETA_TOL and sum intensities sharing the same key.
+        tol = AbstractDiffractionPatternCalculator.TWO_THETA_TOL
+        bin_keys = np.round(two_thetas_arr / tol).astype(int)
+
+        peaks: dict[int, list] = {}
+        for m in range(len(g_hkls)):
+            hkl = tuple(int(v) for v in hkls_int[m])  # np.int64 -> int
+            # Restore the -g reflection dropped by the Friedel halving so
+            # hkl families and multiplicities are reported as before.
+            neg_hkl = tuple(-v for v in hkl)
+            if is_hex:
+                hkl = (hkl[0], hkl[1], -hkl[0] - hkl[1], hkl[2])
+                neg_hkl = (neg_hkl[0], neg_hkl[1], -neg_hkl[0] - neg_hkl[1], neg_hkl[2])
+            key = bin_keys[m]
+            d_hkl = 1.0 / g_hkls[m]
+            if key in peaks:
+                peaks[key][0] += float(intensities[m])  # np.float64 -> float
+                peaks[key][1] += (hkl, neg_hkl)
+            else:
+                peaks[key] = [float(intensities[m]), [hkl, neg_hkl], float(two_thetas_arr[m]), float(d_hkl)]
+
+        # --- Build output ---
         max_intensity = max(v[0] for v in peaks.values())
-        x = []
-        y = []
-        hkls = []
-        d_hkls = []
-        for k in sorted(peaks):
-            v = peaks[k]
+        tol_scaled = AbstractDiffractionPatternCalculator.SCALED_INTENSITY_TOL
+        x, y, hkls_out, d_hkls_out = [], [], [], []
+
+        for key in sorted(peaks):
+            v = peaks[key]
             fam = get_unique_families(v[1])
-            if v[0] / max_intensity * 100 > AbstractDiffractionPatternCalculator.SCALED_INTENSITY_TOL:  # type: ignore[operator]
-                x.append(k)
-                y.append(v[0])
-                hkls.append([{"hkl": hkl, "multiplicity": mult} for hkl, mult in fam.items()])
-                d_hkls.append(v[2])
-        xrd = DiffractionPattern(x, y, hkls, d_hkls)
+            if v[0] / max_intensity * 100 > tol_scaled:
+                x.append(float(v[2]))
+                y.append(float(v[0]))
+                hkls_out.append([{"hkl": hkl, "multiplicity": mult} for hkl, mult in fam.items()])
+                d_hkls_out.append(float(v[3]))
+
+        xrd = DiffractionPattern(x, y, hkls_out, d_hkls_out)
         if scaled:
             xrd.normalize(mode="max", value=100)
         return xrd
